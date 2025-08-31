@@ -1,6 +1,7 @@
 import { NgModule, Injectable } from '@angular/core'
 import { ToolbarButtonProvider, ToolbarButton } from 'tabby-core'
 import { CaptureService } from './services/capture.service'
+import { NettySettingsTabProvider } from './components/settings.component'
 
 @Injectable()
 export class NettyToolbarButtonProvider extends ToolbarButtonProvider {

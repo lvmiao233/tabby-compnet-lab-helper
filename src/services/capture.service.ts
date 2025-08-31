@@ -8,6 +8,31 @@ interface IBuffer {
     length: number
 }
 
+// Electron API类型定义
+interface ElectronAPI {
+    shell?: {
+        showItemInFolder(fullPath: string): void
+    }
+}
+
+// File System Access API类型定义
+interface FileSystemAPI {
+    showDirectoryPicker(options?: { mode?: 'read' | 'readwrite', startIn?: string }): Promise<FileSystemDirectoryHandle>
+}
+
+interface FileSystemDirectoryHandle {
+    getFileHandle(name: string, options?: { create?: boolean }): Promise<FileSystemFileHandle>
+}
+
+interface FileSystemFileHandle {
+    createWritable(): Promise<FileSystemWritableFileStream>
+}
+
+interface FileSystemWritableFileStream {
+    write(data: Blob | BufferSource | string): Promise<void>
+    close(): Promise<void>
+}
+
 interface IBufferLine {
     translateToString(trimRight?: boolean, startColumn?: number, endColumn?: number): string
     isWrapped: boolean
@@ -350,6 +375,9 @@ export class CaptureService {
     private availableBlocks: CaptureBlock[] = [] // 所有可用的区块
     private selectionMode: 'block' | 'line' = 'block' // 选择模式：按区块或按行
     private themesService: ThemesService | null = null // 主题服务
+    private electronAPI: ElectronAPI | null = null // Electron API
+    private fileSystemAPI: FileSystemAPI | null = null // File System API
+    private isSelectingDirectory = false // 防止并发目录选择
 
     public isCaptureMode$: Observable<boolean> = this.isCaptureModeSubject.asObservable()
     public selectedBlocks$: Observable<CaptureBlock[]> = this.selectedBlocksSubject.asObservable()
@@ -362,6 +390,39 @@ export class CaptureService {
         } catch (error) {
             console.warn('⚠️ 无法获取主题服务:', error)
         }
+
+        // 尝试获取Electron API和File System API
+        console.log('🔧 开始初始化API...')
+
+        // 初始化Electron API
+        try {
+            if (typeof (window as any).require === 'function') {
+                const electron = (window as any).require('electron')
+                console.log('📦 electron对象属性:', Object.keys(electron || {}))
+
+                if (electron && electron.shell) {
+                    this.electronAPI = { shell: electron.shell }
+                    console.log('⚡ Electron shell API已初始化')
+                }
+            }
+        } catch (error) {
+            console.warn('⚠️ Electron API初始化失败:', error instanceof Error ? error.message : String(error))
+        }
+
+        // 初始化File System API
+        try {
+            if ('showDirectoryPicker' in window) {
+                this.fileSystemAPI = window as any
+                console.log('⚡ File System Access API已初始化')
+            } else {
+                console.warn('⚠️ 浏览器不支持File System Access API')
+            }
+        } catch (error) {
+            console.warn('⚠️ File System API初始化失败:', error instanceof Error ? error.message : String(error))
+        }
+
+        console.log('🔧 API初始化完成 - Electron:', !!this.electronAPI, 'FileSystem:', !!this.fileSystemAPI)
+
         console.log('📸 CaptureService 初始化')
 
         // 状态条功能已移除，界面更加简洁
@@ -2011,8 +2072,15 @@ export class CaptureService {
             // 创建隐藏的渲染容器
             const renderContainer = this.createRenderContainer(htmlContent)
 
-            // 等待样式加载后渲染图片
+            // 等待样式加载和内容渲染完成后渲染图片
             setTimeout(() => {
+                // 确保容器内容完全渲染
+                const contentElement = renderContainer.querySelector('.terminal-commands') as HTMLElement
+                if (contentElement) {
+                    // 强制重新计算布局
+                    contentElement.offsetHeight
+                }
+
                 this.renderHTMLToImage(renderContainer, blocks.length)
                     .then(blob => {
                         if (blob) {
@@ -2072,8 +2140,15 @@ export class CaptureService {
             // 创建隐藏的渲染容器
             const renderContainer = this.createRenderContainer(htmlContent)
 
-            // 等待样式加载后渲染图片
+            // 等待样式加载和内容渲染完成后渲染图片
             setTimeout(() => {
+                // 确保容器内容完全渲染
+                const contentElement = renderContainer.querySelector('.terminal-commands') as HTMLElement
+                if (contentElement) {
+                    // 强制重新计算布局
+                    contentElement.offsetHeight
+                }
+
                 this.renderHTMLToImage(renderContainer, blocks.length)
                     .then(blob => {
                         if (blob) {
@@ -2100,60 +2175,30 @@ export class CaptureService {
 
     // 生成终端样式的HTML
     private generateTerminalHTML(blocks: CaptureBlock[]): string {
-        const timestamp = new Date().toLocaleString('zh-CN', {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-        })
-
-        let html = `
-            <div class="terminal-export">
-                <div class="terminal-header">
-                    <div class="terminal-title">终端命令导出</div>
-                    <div class="terminal-info">
-                        <span class="timestamp">${timestamp}</span>
-                        <span class="block-count">${blocks.length} 个命令区块</span>
-                    </div>
-                </div>
-                <div class="terminal-content">
-        `
+        // 简化版：只保留命令内容，去除标题、时间戳等
+        let html = `<div class="terminal-commands">`
 
         blocks.forEach((block, index) => {
+            let content = ''
+
             if (this.selectionMode === 'line' && block.selectedLines) {
                 // 按行选择模式：只导出选中的行
                 const lines = block.content.split('\n')
-                const selectedContent = lines
+                content = lines
                     .filter((line, lineIndex) => block.selectedLines![lineIndex])
                     .join('\n')
-
-                if (selectedContent.trim()) {
-                    html += `
-                        <div class="terminal-block">
-                            <div class="terminal-content">${this.escapeHtml(selectedContent)}</div>
-                        </div>
-                    `
-                }
             } else {
                 // 按区块选择模式：直接使用原始区块内容
-                html += `
-                    <div class="terminal-block">
-                        <div class="terminal-content">${this.escapeHtml(block.content)}</div>
-                    </div>
-                `
+                content = block.content
+            }
+
+            if (content.trim()) {
+                // 简化HTML结构，直接输出命令内容
+                html += `<div class="command-line">${this.escapeHtml(content)}</div>`
             }
         })
 
-        html += `
-                </div>
-                <div class="terminal-footer">
-                    <div class="export-info">由 NettyTabby 插件生成</div>
-                </div>
-            </div>
-        `
-
+        html += `</div>`
         return html
     }
 
@@ -2192,70 +2237,42 @@ export class CaptureService {
     // 获取终端样式
     private getTerminalStyles(): string {
         return `
-            .terminal-export {
-                width: 100%;
+            .terminal-commands {
                 background: #1e1e1e;
                 color: #cccccc;
-                padding: 20px;
-                border-radius: 8px;
-                box-sizing: border-box;
-            }
-
-            .terminal-header {
-                border-bottom: 1px solid #3e3e3e;
-                padding-bottom: 15px;
-                margin-bottom: 20px;
-            }
-
-            .terminal-title {
-                font-size: 18px;
-                font-weight: bold;
-                color: #ffffff;
-                margin-bottom: 8px;
-            }
-
-            .terminal-info {
-                display: flex;
-                justify-content: space-between;
-                font-size: 12px;
-                color: #888888;
-            }
-
-            .terminal-content {
-                margin-bottom: 20px;
-            }
-
-            .terminal-block {
-                margin-bottom: 15px;
-                padding: 12px;
-                background: #2d2d2d;
-                border-radius: 6px;
-                border-left: 3px solid #4CAF50;
-            }
-
-            .terminal-content {
-                color: #cccccc;
-                white-space: pre-wrap;
-                word-break: break-all;
                 font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
                 font-size: 14px;
                 line-height: 1.4;
-                background: #2d2d2d;
-                padding: 12px;
-                border-radius: 6px;
-                border-left: 3px solid #4CAF50;
+                width: 100%;
+                box-sizing: border-box;
+                padding: 4px 8px;
             }
 
-            .terminal-footer {
-                border-top: 1px solid #3e3e3e;
-                padding-top: 15px;
-                text-align: center;
-                font-size: 12px;
-                color: #666666;
+            .command-line {
+                color: #cccccc;
+                white-space: pre-wrap;
+                word-break: break-word;
+                margin: 0;
+                padding: 2px 0;
             }
 
-            .export-info {
-                color: #888888;
+            .command-line:last-child {
+                margin-bottom: 0;
+            }
+
+            /* 移除所有不必要的空白和边框 */
+            .terminal-commands * {
+                margin: 0;
+                padding: 0;
+                border: none;
+                box-sizing: border-box;
+            }
+
+            /* 确保页面级别的紧凑布局 */
+            body, html {
+                margin: 0;
+                padding: 0;
+                background: #1e1e1e;
             }
         `
     }
@@ -2265,29 +2282,44 @@ export class CaptureService {
         console.log(`%c🎨 开始将HTML渲染为图片...`, 'background: #FF9800; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
 
         try {
-            // 获取容器尺寸 - 根据内容动态调整宽度和高度
-            const rect = container.getBoundingClientRect()
-            const width = rect.width // 移除固定的最小宽度，根据内容自适应
-            const height = rect.height // 根据内容动态调整高度
+                    // 获取容器尺寸 - 先用HTML容器宽度，高度稍后调整
+        const rect = container.getBoundingClientRect()
+        const width = rect.width // 根据内容自适应宽度
 
-            console.log(`%c📐 图片尺寸: ${width}x${height}`, 'background: #9C27B0; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
+        // 先创建一个临时canvas来测量实际内容高度
+        const tempCanvas = document.createElement('canvas')
+        tempCanvas.width = width
+        tempCanvas.height = 1000 // 临时高度，用于测量
 
-            // 创建canvas
-            const canvas = document.createElement('canvas')
-            canvas.width = width
-            canvas.height = height
+        const tempCtx = tempCanvas.getContext('2d')
+        if (!tempCtx) {
+            throw new Error('无法获取临时canvas 2d上下文')
+        }
 
-            const ctx = canvas.getContext('2d')
-            if (!ctx) {
-                throw new Error('无法获取canvas 2d上下文')
-            }
+        // 在临时canvas上渲染内容以计算实际高度和宽度
+        const { height: actualHeight, maxWidth: contentMaxWidth } = await this.measureTerminalContent(container, width, blockCount)
 
-            // 设置背景
-            ctx.fillStyle = '#1e1e1e'
-            ctx.fillRect(0, 0, width, height)
+        // 使用内容的实际最大宽度，留出一些边距
+        const finalWidth = Math.max(contentMaxWidth + 40, 200) // 至少200px宽，左右各20px边距
 
-            // 简单的文本渲染（由于html2canvas可能不可用，我们使用基础的canvas文本渲染）
-            await this.renderTerminalContentToCanvas(ctx, container, width, height, blockCount)
+        console.log(`%c📐 图片尺寸: ${finalWidth}x${actualHeight} (内容最大宽度: ${contentMaxWidth})`, 'background: #9C27B0; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
+
+        // 创建实际的canvas，使用计算出的实际宽度和高度
+        const canvas = document.createElement('canvas')
+        canvas.width = finalWidth
+        canvas.height = actualHeight
+
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+            throw new Error('无法获取canvas 2d上下文')
+        }
+
+        // 设置背景
+        ctx.fillStyle = '#1e1e1e'
+        ctx.fillRect(0, 0, finalWidth, actualHeight)
+
+        // 使用实际canvas重新渲染内容（不再返回高度）
+        await this.renderTerminalContentToCanvas(ctx, container, finalWidth, actualHeight, blockCount)
 
             // 转换为blob
             return new Promise((resolve) => {
@@ -2300,6 +2332,47 @@ export class CaptureService {
             console.error('❌ Canvas渲染失败:', error)
             return null
         }
+    }
+
+    // 测量终端内容的实际尺寸
+    private async measureTerminalContent(
+        container: HTMLElement,
+        width: number,
+        blockCount: number
+    ): Promise<{ height: number; maxWidth: number }> {
+        // 创建临时canvas用于测量
+        const measureCanvas = document.createElement('canvas')
+        const measureCtx = measureCanvas.getContext('2d')
+        if (!measureCtx) {
+            throw new Error('无法获取测量canvas 2d上下文')
+        }
+
+        // 设置字体（与渲染时相同）
+        measureCtx.font = '14px Consolas, Monaco, "Courier New", monospace'
+
+        let y = 8  // 从8px开始
+        let maxWidth = 0
+
+        // 测量所有命令行的尺寸
+        const commandLines = container.querySelectorAll('.command-line')
+        commandLines.forEach((commandLine, index) => {
+            if (commandLine.textContent) {
+                const contentLines = commandLine.textContent.split('\n')
+                contentLines.forEach(line => {
+                    // 测量这一行的宽度
+                    const metrics = measureCtx.measureText(line)
+                    maxWidth = Math.max(maxWidth, metrics.width)
+
+                    // 累加高度（行高18px）
+                    y += 18
+                })
+
+                // 区块间距
+                y += 10
+            }
+        })
+
+        return { height: y, maxWidth }
     }
 
     // 将终端内容渲染到canvas
@@ -2317,78 +2390,26 @@ export class CaptureService {
         ctx.fillStyle = '#ffffff'
         ctx.textBaseline = 'top'
 
-        let y = 30
+        let y = 8  // 减少顶部空白，从8px开始
 
-        // 标题
-        ctx.font = 'bold 18px Arial'
-        ctx.fillText('终端命令导出', 20, y)
-        y += 30
-
-        // 信息行
-        ctx.font = '12px Arial'
-        ctx.fillStyle = '#888888'
-        const timestamp = new Date().toLocaleString('zh-CN')
-        ctx.fillText(timestamp, 20, y)
-        ctx.fillText(`${blockCount} 个命令区块`, width - 150, y)
-        y += 40
-
-        // 绘制分割线
-        ctx.strokeStyle = '#3e3e3e'
-        ctx.lineWidth = 1
-        ctx.beginPath()
-        ctx.moveTo(20, y)
-        ctx.lineTo(width - 20, y)
-        ctx.stroke()
-        y += 20
-
-        // 获取区块内容并渲染 - 直接使用原始内容
-        const blocks = container.querySelectorAll('.terminal-block')
-        blocks.forEach((block, index) => {
-            const contentElement = block.querySelector('.terminal-content')
-
-            if (contentElement && contentElement.textContent) {
-                // 直接渲染原始区块内容
+        // 获取命令内容并渲染 - 使用新的简化HTML结构
+        const commandLines = container.querySelectorAll('.command-line')
+        commandLines.forEach((commandLine, index) => {
+            if (commandLine.textContent) {
+                // 渲染命令行内容
                 ctx.fillStyle = '#cccccc'
                 ctx.font = '14px Consolas, Monaco, "Courier New", monospace'
 
-                const contentLines = contentElement.textContent.split('\n')
+                const contentLines = commandLine.textContent.split('\n')
                 contentLines.forEach(line => {
-                    // 处理长行自动换行
-                    const maxWidth = width - 40
-                    let currentLine = line
-                    let lineY = y
-
-                    while (currentLine.length > 0) {
-                        const metrics = ctx.measureText(currentLine)
-                        if (metrics.width <= maxWidth) {
-                            ctx.fillText(currentLine, 20, lineY)
-                            break
-                        } else {
-                            // 找到可以断开的位置
-                            let breakPoint = Math.floor((maxWidth / metrics.width) * currentLine.length)
-                            while (breakPoint > 0 && currentLine.charAt(breakPoint) !== ' ') {
-                                breakPoint--
-                            }
-                            if (breakPoint === 0) breakPoint = Math.floor(currentLine.length / 2)
-
-                            const linePart = currentLine.substring(0, breakPoint)
-                            ctx.fillText(linePart, 20, lineY)
-                            currentLine = currentLine.substring(breakPoint).trim()
-                            lineY += 18
-                        }
-                    }
-
-                    y = lineY + 18
+                    // 完全按照终端显示的方式渲染，不进行任何换行处理
+                    ctx.fillText(line, 20, y)
+                    y += 18
                 })
 
                 y += 10 // 区块间距
             }
         })
-
-        // 页脚
-        ctx.font = '12px Arial'
-        ctx.fillStyle = '#666666'
-        ctx.fillText('由 NettyTabby 插件生成', width / 2 - 80, height - 30)
 
         console.log(`%c✅ Canvas渲染完成`, 'background: #4CAF50; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
     }
@@ -2409,35 +2430,18 @@ export class CaptureService {
     }
 
     // 执行实际的下载操作
-    private performDownload(blob: Blob, blockCount: number): void {
+    private async performDownload(blob: Blob, blockCount: number): Promise<void> {
         try {
             const timestamp = new Date().getTime()
-            const filename = `terminal-commands-${timestamp}-${blockCount}-blocks.png`
+            const filename = `netty-commands-${timestamp}-${blockCount}-blocks.png`
 
-            // 方法1: 使用 download 属性 (某些浏览器会直接下载)
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = filename
-            a.style.display = 'none'
-
-            // 尝试直接触发下载
-            document.body.appendChild(a)
-
-            // 在某些浏览器中，我们需要用户交互后才能下载
-            // 这里我们使用一个小的延迟来确保DOM更新
-            setTimeout(() => {
-                a.click()
-                document.body.removeChild(a)
-                URL.revokeObjectURL(url)
-
-                console.log(`%c✅ 图片下载触发成功`, 'background: #4CAF50; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
-                console.log(`%c📁 如果浏览器弹出保存对话框，请选择保存位置`, 'background: #FF9800; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
-                console.log(`%c💡 提示: 某些浏览器会弹出保存对话框，这是正常行为`, 'background: #9C27B0; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
-
-                // 显示下载提示
-                this.showDownloadNotification()
-            }, 100)
+            // 检查是否有Electron API可用
+            if (this.electronAPI) {
+                await this.performSmartDownload(blob, filename, blockCount)
+            } else {
+                console.log('⚠️ Electron API不可用，使用传统下载方式')
+                this.performTraditionalDownload(blob, filename)
+            }
 
         } catch (error) {
             console.error('❌ 图片下载失败:', error)
@@ -2445,6 +2449,226 @@ export class CaptureService {
 
             // 备用方案：创建一个新的窗口显示图片，让用户右键保存
             this.fallbackDownload(blob, blockCount)
+        }
+    }
+
+    // 智能下载：优先使用File System Access API，降级到传统下载
+    private async performSmartDownload(blob: Blob, filename: string, blockCount: number): Promise<void> {
+        try {
+            console.log(`%c🎯 开始智能下载流程`, 'background: #2196F3; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
+            console.log(`%c📄 文件名: ${filename}`, 'background: #9C27B0; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
+            console.log(`%c📊 区块数量: ${blockCount}`, 'background: #FF9800; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
+
+            // 优先使用File System Access API
+            console.log('🔍 检查this.fileSystemAPI:', !!this.fileSystemAPI)
+            console.log('🔍 this.fileSystemAPI类型:', typeof this.fileSystemAPI)
+            console.log('🔍 window.showDirectoryPicker存在:', typeof (window as any).showDirectoryPicker)
+
+            if (this.fileSystemAPI) {
+                console.log('📂 尝试使用File System Access API...')
+
+                // 检查是否正在进行目录选择
+                if (this.isSelectingDirectory) {
+                    console.log('⚠️ 目录选择正在进行中，请稍后再试')
+                    this.performTraditionalDownload(blob, filename)
+                    return
+                }
+
+                // 选择下载目录
+                console.log('📂 调用selectDownloadDirectory...')
+                console.log('📂 this.selectDownloadDirectory方法存在:', typeof this.selectDownloadDirectory)
+                const dirHandle = await this.selectDownloadDirectory()
+                console.log('📂 selectDownloadDirectory返回:', dirHandle ? '成功' : '失败')
+
+                if (dirHandle) {
+                    console.log('📝 开始调用writeFileWithFSAPI...')
+                    // 写入文件
+                    const savedFilename = await this.writeFileWithFSAPI(dirHandle, filename, blob)
+                    console.log('📝 writeFileWithFSAPI返回:', savedFilename)
+
+                    console.log(`%c🟢 文件保存成功！`, 'background: #4CAF50; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
+                    console.log(`%c📂 已保存到选择的目录: ${savedFilename}`, 'background: #2196F3; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
+
+                    // 尝试打开文件所在目录（如果shell API可用）
+                    if (this.electronAPI && this.electronAPI.shell) {
+                        // 注意：这里我们不知道确切的路径，只能尝试打开downloads文件夹
+                        setTimeout(() => {
+                            this.showInFolder('downloads')
+                        }, 500)
+                    }
+
+                    // 延迟退出捕获模式，给用户时间看到成功消息
+                    setTimeout(() => {
+                        console.log('🔄 文件保存完成，准备退出捕获模式')
+                        this.toggleCaptureMode()
+                    }, 1000)
+
+                    return
+                } else {
+                    console.log('📁 用户取消了目录选择，降级到传统下载')
+                }
+            } else {
+                console.log('⚠️ File System Access API不可用，降级到传统下载')
+            }
+
+            // 降级到传统下载
+            this.performTraditionalDownload(blob, filename)
+
+        } catch (error) {
+            console.error('🔴 智能下载失败:', error)
+            console.log('⚠️ 尝试使用传统下载作为后备方案')
+            this.performTraditionalDownload(blob, filename)
+        }
+    }
+
+    // 传统下载：作为后备方案
+    private performTraditionalDownload(blob: Blob, filename: string): void {
+        console.log(`%c📥 使用传统下载模式`, 'background: #FF9800; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
+
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        a.style.display = 'none'
+
+        document.body.appendChild(a)
+
+        setTimeout(() => {
+            a.click()
+            document.body.removeChild(a)
+            URL.revokeObjectURL(url)
+
+            console.log(`%c✅ 传统下载已触发`, 'background: #4CAF50; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
+            console.log(`%c📁 请在弹出的保存对话框中选择保存位置`, 'background: #FF9800; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
+        }, 100)
+    }
+
+    // 使用File System Access API写入文件
+    private async writeFileWithFSAPI(dirHandle: FileSystemDirectoryHandle, filename: string, blob: Blob): Promise<string> {
+        console.log('📝 开始写入文件:', filename)
+        console.log('📊 Blob大小:', blob.size, 'bytes')
+
+        try {
+            console.log('📄 创建文件句柄...')
+            // 创建或获取文件句柄
+            const fileHandle = await dirHandle.getFileHandle(filename, { create: true })
+            console.log('✅ 文件句柄创建成功')
+
+            console.log('✏️ 创建可写流...')
+            // 创建可写流
+            const writable = await fileHandle.createWritable()
+            console.log('✅ 可写流创建成功')
+
+            console.log('💾 开始写入数据...')
+            // 写入数据
+            await writable.write(blob)
+            console.log('✅ 数据写入成功')
+
+            console.log('🔒 关闭可写流...')
+            await writable.close()
+            console.log('✅ 可写流关闭成功')
+
+            console.log('🎉 文件写入完成')
+            // 返回文件名（用于后续操作）
+            return filename
+        } catch (error) {
+            console.error('❌ File System API写入失败:', error)
+            console.log('🔍 错误详情:', {
+                message: error instanceof Error ? error.message : String(error),
+                name: error instanceof Error ? error.name : 'Unknown',
+                stack: error instanceof Error ? error.stack : undefined
+            })
+            throw new Error(`File System API写入失败: ${error instanceof Error ? error.message : String(error)}`)
+        }
+    }
+
+    // 选择下载目录
+    private async selectDownloadDirectory(): Promise<FileSystemDirectoryHandle | null> {
+        console.log('🏁 进入selectDownloadDirectory方法')
+        console.log('🔍 方法内this.fileSystemAPI:', !!this.fileSystemAPI)
+        console.log('🔍 方法内this.fileSystemAPI类型:', typeof this.fileSystemAPI)
+
+        if (!this.fileSystemAPI) {
+            console.warn('⚠️ File System Access API不可用')
+            return null
+        }
+
+        console.log('✅ 通过API检查，开始目录选择...')
+
+        // 防止并发调用
+        if (this.isSelectingDirectory) {
+            console.log('⚠️ 目录选择器已在运行中，请稍后再试')
+            return null
+        }
+
+        this.isSelectingDirectory = true
+
+        try {
+            // 获取上次保存的目录路径
+            const savedDirPath = localStorage.getItem('netty-download-dir')
+            console.log('📂 获取savedDirPath:', savedDirPath)
+
+            console.log('📂 准备调用showDirectoryPicker...')
+            console.log('📂 this.fileSystemAPI.showDirectoryPicker类型:', typeof this.fileSystemAPI.showDirectoryPicker)
+
+            // 选择目录
+            const dirHandle = await this.fileSystemAPI.showDirectoryPicker({
+                mode: 'readwrite',
+                startIn: savedDirPath || undefined
+            })
+
+            console.log('📂 showDirectoryPicker调用完成')
+
+            // 保存目录路径到本地存储
+            localStorage.setItem('netty-download-dir', 'downloads') // 简化存储，只保存标识
+
+            console.log('💡 提示：File System Access API每次都需要用户确认，这是浏览器的安全机制')
+            console.log('✅ 目录已成功选择，下次使用时仍然需要确认选择')
+
+            return dirHandle
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                console.log('📁 用户取消了目录选择')
+            } else if (error instanceof Error && error.name === 'NotAllowedError') {
+                console.log('⚠️ 文件选择器已在运行中，请关闭其他文件对话框后再试')
+                // 延迟一段时间再重置标志，给用户一些缓冲时间
+                setTimeout(() => {
+                    this.isSelectingDirectory = false
+                }, 1000)
+                return null
+            } else {
+                console.error('❌ 选择目录失败:', error)
+            }
+            return null
+        } finally {
+            // 重置标志
+            this.isSelectingDirectory = false
+        }
+    }
+
+    // 传统的文件写入方法（备用）
+    private writeFileSafely(filePath: string, data: Buffer): void {
+        try {
+            // 在Electron环境中，我们需要使用不同的方式访问fs
+            const fs = (window as any).require('fs')
+            fs.writeFileSync(filePath, data)
+        } catch (error) {
+            throw new Error(`文件写入失败: ${error}`)
+        }
+    }
+
+    // 在文件管理器中显示文件
+    private showInFolder(filePath: string): void {
+        if (!this.electronAPI || !this.electronAPI.shell) {
+            console.warn('⚠️ Electron shell API不可用')
+            return
+        }
+
+        try {
+            this.electronAPI.shell.showItemInFolder(filePath)
+            console.log(`%c📂 已打开文件所在文件夹`, 'background: #2196F3; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
+        } catch (error) {
+            console.warn('⚠️ 无法打开文件所在文件夹:', error)
         }
     }
 
