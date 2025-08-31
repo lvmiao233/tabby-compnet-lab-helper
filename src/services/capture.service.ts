@@ -345,7 +345,7 @@ export class BlockSelectionModalComponent {
 export class CaptureService {
     private isCaptureModeSubject = new BehaviorSubject<boolean>(false)
     private selectedBlocksSubject = new BehaviorSubject<CaptureBlock[]>([])
-    private statusBarElement: HTMLElement | null = null
+
     private currentBrowseIndex = -1 // 当前浏览的区块索引
     private availableBlocks: CaptureBlock[] = [] // 所有可用的区块
     private selectionMode: 'block' | 'line' = 'block' // 选择模式：按区块或按行
@@ -364,21 +364,7 @@ export class CaptureService {
         }
         console.log('📸 CaptureService 初始化')
 
-        // 监听状态变化，更新状态栏
-        this.isCaptureMode$.subscribe(isCapture => {
-            if (isCapture) {
-                this.showStatusBar()
-            } else {
-                this.hideStatusBar()
-            }
-        })
-
-        // 监听区块变化，更新状态栏
-        this.selectedBlocks$.subscribe(() => {
-            if (this.isCaptureModeSubject.value) {
-                this.updateStatusBar()
-            }
-        })
+        // 状态条功能已移除，界面更加简洁
     }
 
     toggleCaptureMode(): void {
@@ -400,160 +386,9 @@ export class CaptureService {
         }
     }
 
-    private showStatusBar(): void {
-        if (this.statusBarElement) {
-            this.statusBarElement.style.display = 'block'
-            this.updateStatusBar()
-            return
-        }
+    // 状态条功能已完全移除
 
-        // 查找终端内容区域
-        const terminalContent = document.querySelector('.content')
-        if (!terminalContent) {
-            console.warn('⚠️ 找不到终端内容区域')
-            return
-        }
-
-        // 创建状态栏
-        const statusBar = document.createElement('div')
-        statusBar.id = 'netty-status-bar'
-        statusBar.style.cssText = `
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 28px;
-            background: rgba(0, 0, 0, 0.8);
-            color: #ffffff;
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-            font-size: 12px;
-            display: flex;
-            align-items: center;
-            padding: 0 12px;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-            z-index: 100;
-            backdrop-filter: blur(5px);
-        `
-
-                       statusBar.innerHTML = `
-                   <span class="netty-status-icon">🎯</span>
-                   <span class="netty-status-text">Netty捕获</span>
-                   <span class="netty-status-blocks">区块: 0</span>
-                   <span class="netty-status-shortcuts">快捷键: Ctrl+方向键浏览, Ctrl+空格选择, Ctrl+A全选, Ctrl+D清空, Enter完成, Esc取消</span>
-                   <span class="netty-status-state">状态: 就绪</span>
-               `
-
-        // 添加到终端内容区域
-        terminalContent.appendChild(statusBar)
-        this.statusBarElement = statusBar
-
-        console.log('✅ 状态栏已显示')
-
-        // 绑定键盘事件
-        this.bindKeyboardEvents()
-    }
-
-    private hideStatusBar(): void {
-        if (this.statusBarElement) {
-            this.statusBarElement.style.display = 'none'
-            console.log('✅ 状态栏已隐藏')
-        }
-    }
-
-    private updateStatusBar(): void {
-        if (!this.statusBarElement) return
-
-        const selectedCount = this.selectedBlocksSubject.value.length
-        const totalBlocks = this.availableBlocks.length
-        const currentIndex = this.currentBrowseIndex + 1
-
-        let statusText = '状态: 就绪'
-        let blocksText = `区块: ${selectedCount}/${totalBlocks}`
-
-        if (this.availableBlocks.length > 0 && this.currentBrowseIndex >= 0) {
-            const currentBlock = this.availableBlocks[this.currentBrowseIndex]
-            const isSelected = this.selectedBlocksSubject.value.some(b => b.id === currentBlock.id)
-            statusText = `浏览中 [${currentIndex}/${totalBlocks}] ${isSelected ? '✅' : '⬜'}`
-            blocksText = `选择: ${selectedCount}/${totalBlocks} | 浏览: ${currentIndex}`
-        } else if (selectedCount > 0) {
-            statusText = `已选择 ${selectedCount} 个区块`
-        }
-
-        // 更新状态栏内容
-        const blocksElement = this.statusBarElement.querySelector('.netty-status-blocks') as HTMLElement
-        const stateElement = this.statusBarElement.querySelector('.netty-status-state') as HTMLElement
-
-        if (blocksElement) blocksElement.textContent = blocksText
-        if (stateElement) stateElement.textContent = statusText
-
-        console.log(`🔄 状态栏已更新: ${blocksText} | ${statusText}`)
-    }
-
-    private bindKeyboardEvents(): void {
-        if (!this.isCaptureModeSubject.value) return
-
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (!this.isCaptureModeSubject.value) {
-                document.removeEventListener('keydown', handleKeyDown)
-                return
-            }
-
-            switch (event.key) {
-                case 'Enter':
-                    event.preventDefault()
-                    console.log('⏎ Enter键按下 - 完成捕获')
-                    this.completeCapture()
-                    break
-                case 'Escape':
-                    event.preventDefault()
-                    console.log('⎋ Escape键按下 - 取消捕获')
-                    this.toggleCaptureMode()
-                    break
-                case 'ArrowRight':
-                case 'ArrowDown':
-                    if (event.ctrlKey || event.metaKey) {
-                        event.preventDefault()
-                        console.log('→ Ctrl+右箭头 - 浏览下一个区块')
-                        this.browseNextBlock()
-                    }
-                    break
-                case 'ArrowLeft':
-                case 'ArrowUp':
-                    if (event.ctrlKey || event.metaKey) {
-                        event.preventDefault()
-                        console.log('← Ctrl+左箭头 - 浏览上一个区块')
-                        this.browsePreviousBlock()
-                    }
-                    break
-                case ' ': // 空格键
-                    if (event.ctrlKey || event.metaKey) {
-                        event.preventDefault()
-                        console.log('␣ Ctrl+空格 - 选择/取消选择当前区块')
-                        this.toggleCurrentBlockSelection()
-                    }
-                    break
-                case 'a':
-                case 'A':
-                    if (event.ctrlKey || event.metaKey) {
-                        event.preventDefault()
-                        console.log('🄰 Ctrl+A - 选择所有区块')
-                        this.selectAllBlocks()
-                    }
-                    break
-                case 'd':
-                case 'D':
-                    if (event.ctrlKey || event.metaKey) {
-                        event.preventDefault()
-                        console.log('🄳 Ctrl+D - 取消所有选择')
-                        this.clearAllSelections()
-                    }
-                    break
-            }
-        }
-
-        document.addEventListener('keydown', handleKeyDown)
-        console.log('⌨️ 键盘事件已绑定')
-    }
+    // 快捷键功能已完全移除，界面更加简洁
 
     // 获取当前终端实例
     private getCurrentTerminal(): ITerminal | null {
@@ -910,7 +745,6 @@ export class CaptureService {
         if (this.availableBlocks.length === 0) return
 
         this.currentBrowseIndex = (this.currentBrowseIndex + 1) % this.availableBlocks.length
-        this.updateStatusBar()
         console.log(`🔄 浏览到区块 ${this.currentBrowseIndex + 1}/${this.availableBlocks.length}`)
         console.log(`📋 当前区块内容: ${this.availableBlocks[this.currentBrowseIndex].content.substring(0, 50)}...`)
     }
@@ -920,7 +754,6 @@ export class CaptureService {
 
         this.currentBrowseIndex = this.currentBrowseIndex <= 0 ?
             this.availableBlocks.length - 1 : this.currentBrowseIndex - 1
-        this.updateStatusBar()
         console.log(`🔄 浏览到区块 ${this.currentBrowseIndex + 1}/${this.availableBlocks.length}`)
         console.log(`📋 当前区块内容: ${this.availableBlocks[this.currentBrowseIndex].content.substring(0, 50)}...`)
     }
@@ -942,7 +775,6 @@ export class CaptureService {
             console.log(`✅ 选择区块 ${this.currentBrowseIndex + 1}: ${block.content.substring(0, 30)}...`)
         }
 
-        this.updateStatusBar()
         this.updateAllBlockHighlights() // 更新所有高亮
     }
 
@@ -954,7 +786,6 @@ export class CaptureService {
             this.addBlock(selectedBlock)
         })
         console.log(`✅ 选择所有 ${this.availableBlocks.length} 个区块`)
-        this.updateStatusBar()
         this.updateAllBlockHighlights() // 更新所有高亮
     }
 
@@ -962,7 +793,6 @@ export class CaptureService {
     clearAllSelections(): void {
         this.clearSelection()
         console.log('❌ 取消所有选择')
-        this.updateStatusBar()
         this.updateAllBlockHighlights() // 更新高亮状态
     }
 
@@ -1575,9 +1405,12 @@ export class CaptureService {
             border: 1px solid ${themeColors.border};
             border-radius: 8px;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-            max-width: 800px;
-            max-height: 80vh;
-            width: 90%;
+            max-width: 95vw;
+            max-height: 95vh;
+            width: 95vw;
+            height: 95vh;
+            display: flex;
+            flex-direction: column;
             overflow: hidden;
             color: ${themeColors.foreground};
         `
@@ -1587,9 +1420,10 @@ export class CaptureService {
         // 模态框主体
         const modalBody = document.createElement('div')
         modalBody.style.cssText = `
+            flex: 1;
             padding: 16px;
-            max-height: 60vh;
             overflow-y: auto;
+            min-height: 0;
         `
 
         // 移除统计信息显示
@@ -1597,7 +1431,7 @@ export class CaptureService {
         // 区块列表
         const blocksList = document.createElement('div')
         blocksList.style.cssText = `
-            max-height: 50vh;
+            height: 100%;
             overflow-y: auto;
         `
 
@@ -1620,6 +1454,7 @@ export class CaptureService {
         // 模态框底部工具栏
         const modalFooter = document.createElement('div')
         modalFooter.style.cssText = `
+            flex-shrink: 0;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -1629,7 +1464,7 @@ export class CaptureService {
             background: ${themeColors.backgroundSecondary};
             border-radius: 0 0 8px 8px;
             color: ${themeColors.foreground};
-            min-height: 48px;
+            height: 60px;
         `
 
         // 左侧：标题文字
@@ -1749,6 +1584,8 @@ export class CaptureService {
             </svg>
         `, '关闭', () => {
             this.closeModal(modalContainer)
+            // 关闭模态框时自动退出捕获模式
+            this.toggleCaptureMode()
         }, themeColors)
 
         rightSection.appendChild(modeSwitch)
