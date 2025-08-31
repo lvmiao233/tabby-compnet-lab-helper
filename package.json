@@ -1,6 +1,6 @@
 {
   "name": "tabby-netty-plugin",
-  "version": "0.2.15",
+  "version": "0.2.16",
   "description": "NettyTabby Plugin - GNS3实验助手",
   "keywords": ["tabby-plugin"],
   "main": "dist/index.js",

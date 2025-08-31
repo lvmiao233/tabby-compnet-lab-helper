@@ -1,6 +1,6 @@
 import { Injectable, NgZone, Injector, Component } from '@angular/core'
 import { BehaviorSubject, Observable } from 'rxjs'
-import { AppService } from 'tabby-core'
+import { AppService, ThemesService } from 'tabby-core'
 
 // xterm.js类型定义
 interface IBuffer {
@@ -349,11 +349,19 @@ export class CaptureService {
     private currentBrowseIndex = -1 // 当前浏览的区块索引
     private availableBlocks: CaptureBlock[] = [] // 所有可用的区块
     private selectionMode: 'block' | 'line' = 'block' // 选择模式：按区块或按行
+    private themesService: ThemesService | null = null // 主题服务
 
     public isCaptureMode$: Observable<boolean> = this.isCaptureModeSubject.asObservable()
     public selectedBlocks$: Observable<CaptureBlock[]> = this.selectedBlocksSubject.asObservable()
 
     constructor(private ngZone: NgZone, private injector: Injector) {
+        // 获取主题服务
+        try {
+            this.themesService = this.injector.get(ThemesService)
+            console.log('🎨 主题服务已注入')
+        } catch (error) {
+            console.warn('⚠️ 无法获取主题服务:', error)
+        }
         console.log('📸 CaptureService 初始化')
 
         // 监听状态变化，更新状态栏
@@ -1446,6 +1454,69 @@ export class CaptureService {
         return this.selectionMode
     }
 
+    // 获取主题颜色
+    private getThemeColors() {
+        const root = document.documentElement
+
+        // 获取基础主题色
+        const bgColor = getComputedStyle(root).getPropertyValue('--body-bg') || '#131d27'
+        const fgColor = getComputedStyle(root).getPropertyValue('--bs-body-color') || '#ccc'
+
+        // 计算更亮的文字颜色，确保对比度足够
+        const isDarkBg = this.isColorDark(bgColor)
+        const textColor = isDarkBg ? '#ffffff' : '#000000'  // 在深色背景下用白色，在浅色背景下用黑色
+
+        return {
+            background: bgColor,
+            backgroundSecondary: getComputedStyle(root).getPropertyValue('--body-bg2') || '#20333e',
+            foreground: textColor,  // 使用计算出的高对比度文字色
+            originalForeground: fgColor,  // 保存原始前景色用于其他用途
+            border: getComputedStyle(root).getPropertyValue('--bs-border-color') || '#495057',
+            primary: getComputedStyle(root).getPropertyValue('--bs-primary') || '#4CAF50',
+            success: getComputedStyle(root).getPropertyValue('--bs-success') || '#28a745',
+            danger: getComputedStyle(root).getPropertyValue('--bs-danger') || '#dc3545',
+            muted: getComputedStyle(root).getPropertyValue('--bs-muted-color') || '#6c757d',
+            // 选择状态的高亮色
+            selectionBg: isDarkBg ? 'rgba(76, 175, 80, 0.2)' : 'rgba(76, 175, 80, 0.1)',
+            selectionBorder: '#4CAF50'
+        }
+    }
+
+    // 判断颜色是否为深色
+    private isColorDark(color: string): boolean {
+        // 移除可能的透明度
+        if (color.startsWith('rgba')) {
+            const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+            if (match) {
+                const r = parseInt(match[1])
+                const g = parseInt(match[2])
+                const b = parseInt(match[3])
+                // 计算亮度 (YIQ公式)
+                const brightness = (r * 299 + g * 587 + b * 114) / 1000
+                return brightness < 128
+            }
+        }
+
+        // 简单的十六进制颜色判断
+        const hex = color.replace('#', '')
+        if (hex.length === 3) {
+            const r = parseInt(hex[0] + hex[0], 16)
+            const g = parseInt(hex[1] + hex[1], 16)
+            const b = parseInt(hex[2] + hex[2], 16)
+            const brightness = (r * 299 + g * 587 + b * 114) / 1000
+            return brightness < 128
+        } else if (hex.length === 6) {
+            const r = parseInt(hex.substring(0, 2), 16)
+            const g = parseInt(hex.substring(2, 4), 16)
+            const b = parseInt(hex.substring(4, 6), 16)
+            const brightness = (r * 299 + g * 587 + b * 114) / 1000
+            return brightness < 128
+        }
+
+        // 默认假设为深色
+        return true
+    }
+
     completeCapture(): void {
         const selectedBlocks = this.getSelectedBlocks()
         console.log(`🎉 完成捕获，共选择 ${selectedBlocks.length} 个区块`)
@@ -1474,6 +1545,9 @@ export class CaptureService {
     private showBlockSelectionModal(blocks: CaptureBlock[]): void {
         console.log('🪟 显示区块选择窗口...')
 
+        // 获取主题颜色
+        const themeColors = this.getThemeColors()
+
         // 创建模态框容器
         const modalContainer = document.createElement('div')
         modalContainer.id = 'netty-selection-modal'
@@ -1497,13 +1571,15 @@ export class CaptureService {
         // 创建模态框内容
         const modalContent = document.createElement('div')
         modalContent.style.cssText = `
-            background: white;
+            background: ${themeColors.background};
+            border: 1px solid ${themeColors.border};
             border-radius: 8px;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
             max-width: 800px;
             max-height: 80vh;
             width: 90%;
             overflow: hidden;
+            color: ${themeColors.foreground};
         `
 
         // 模态框头部
@@ -1512,18 +1588,20 @@ export class CaptureService {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 20px;
-            border-bottom: 1px solid #e0e0e0;
-            background: #f8f9fa;
+            padding: 12px 16px;
+            border-bottom: 1px solid ${themeColors.border};
+            background: ${themeColors.backgroundSecondary};
             border-radius: 8px 8px 0 0;
+            color: ${themeColors.foreground};
+            min-height: 48px;
         `
 
         const title = document.createElement('h3')
         title.textContent = '选择要导出的命令区块'
         title.style.cssText = `
             margin: 0;
-            color: #333;
-            font-size: 18px;
+            color: ${themeColors.foreground};
+            font-size: 16px;
             font-weight: 600;
         `
 
@@ -1532,12 +1610,12 @@ export class CaptureService {
         closeBtn.style.cssText = `
             background: none;
             border: none;
-            font-size: 24px;
+            font-size: 20px;
             cursor: pointer;
-            color: #666;
+            color: ${themeColors.muted};
             padding: 0;
-            width: 30px;
-            height: 30px;
+            width: 24px;
+            height: 24px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1554,8 +1632,8 @@ export class CaptureService {
         // 模态框主体
         const modalBody = document.createElement('div')
         modalBody.style.cssText = `
-            padding: 20px;
-            max-height: 50vh;
+            padding: 16px;
+            max-height: 60vh;
             overflow-y: auto;
         `
 
@@ -1564,7 +1642,7 @@ export class CaptureService {
         stats.textContent = `共发现 ${blocks.length} 个命令区块`
         stats.style.cssText = `
             margin-bottom: 15px;
-            color: #666;
+            color: ${themeColors.muted};
             font-size: 14px;
         `
         modalBody.appendChild(stats)
@@ -1572,14 +1650,14 @@ export class CaptureService {
         // 区块列表
         const blocksList = document.createElement('div')
         blocksList.style.cssText = `
-            max-height: 40vh;
+            max-height: 50vh;
             overflow-y: auto;
         `
 
         // 正序显示区块（最早的命令在前），但自动滚动到底部显示最新内容
         for (let i = 0; i < blocks.length; i++) {
             const block = blocks[i]
-            const blockItem = this.createBlockItem(block, i, blocksList, blocks)
+            const blockItem = this.createBlockItem(block, i, blocksList, blocks, themeColors)
             blocksList.appendChild(blockItem)
         }
 
@@ -1599,10 +1677,12 @@ export class CaptureService {
             justify-content: space-between;
             align-items: center;
             gap: 10px;
-            padding: 20px;
-            border-top: 1px solid #e0e0e0;
-            background: #f8f9fa;
+            padding: 12px 16px;
+            border-top: 1px solid ${themeColors.border};
+            background: ${themeColors.backgroundSecondary};
             border-radius: 0 0 8px 8px;
+            color: ${themeColors.foreground};
+            min-height: 48px;
         `
 
         const selectAllBtn = this.createModalButton('全选', 'secondary', () => {
@@ -1619,7 +1699,7 @@ export class CaptureService {
                 blocks.forEach(block => block.selected = true)
             }
             this.updateModalDisplay(blocksList, blocks, modalFooter)
-        })
+        }, themeColors)
 
         const clearAllBtn = this.createModalButton('清空', 'secondary', () => {
             if (this.selectionMode === 'line') {
@@ -1635,7 +1715,7 @@ export class CaptureService {
                 blocks.forEach(block => block.selected = false)
             }
             this.updateModalDisplay(blocksList, blocks, modalFooter)
-        })
+        }, themeColors)
 
         const copyBtn = this.createModalButton('📋 复制到剪贴板', 'primary', () => {
             let selectedBlocks = blocks.filter(block => block.selected)
@@ -1649,7 +1729,7 @@ export class CaptureService {
 
             this.copyBlocksToClipboard(selectedBlocks)
             // 不关闭窗口，让用户可以继续操作
-        })
+        }, themeColors)
 
         const downloadBtn = this.createModalButton('💾 下载并复制', 'success', () => {
             let selectedBlocks = blocks.filter(block => block.selected)
@@ -1663,11 +1743,11 @@ export class CaptureService {
 
             this.downloadBlocksAndCopy(selectedBlocks)
             this.closeModal(modalContainer)
-        })
+        }, themeColors)
 
         const cancelBtn = this.createModalButton('取消', 'cancel', () => {
             this.closeModal(modalContainer)
-        })
+        }, themeColors)
 
         // 左侧：全选、清空和行选择开关
         const leftButtons = document.createElement('div')
@@ -1704,7 +1784,7 @@ export class CaptureService {
             console.log(`🔄 切换到${this.selectionMode === 'block' ? '按区块选择' : '按行选择'}模式`)
 
             // 重新渲染区块列表以应用新的选择模式
-            this.refreshBlockDisplay(blocksList, blocks, modalFooter)
+            this.refreshBlockDisplay(blocksList, blocks, modalFooter, themeColors)
         }
 
         lineSelectSwitch.appendChild(lineSelectCheckbox)
@@ -1740,24 +1820,32 @@ export class CaptureService {
     }
 
     // 创建区块项
-    private createBlockItem(block: CaptureBlock, index: number, container: HTMLElement, allBlocks: CaptureBlock[]): HTMLElement {
+    private createBlockItem(block: CaptureBlock, index: number, container: HTMLElement, allBlocks: CaptureBlock[], themeColors?: any): HTMLElement {
+        // 如果没有提供主题颜色，使用默认值
+        const colors = themeColors || {
+            border: '#e0e0e0',
+            background: '#ffffff',
+            success: '#4CAF50'
+        }
+
         const item = document.createElement('div')
         item.style.cssText = `
-            border: 1px solid #e0e0e0;
+            border: 1px solid ${colors.border};
             border-radius: 6px;
             margin-bottom: 10px;
             cursor: pointer;
             transition: all 0.2s ease;
+            background: ${colors.background};
         `
 
         const updateSelectedStyle = () => {
-            item.style.borderColor = block.selected ? '#4CAF50' : '#e0e0e0'
-            item.style.backgroundColor = block.selected ? '#E8F5E8' : 'transparent'
+            item.style.borderColor = block.selected ? colors.selectionBorder : colors.border
+            item.style.backgroundColor = block.selected ? colors.selectionBg : colors.background
         }
 
         item.onmouseover = () => {
-            item.style.borderColor = '#4CAF50'
-            item.style.boxShadow = '0 2px 8px rgba(76, 175, 80, 0.1)'
+            item.style.borderColor = colors.selectionBorder
+            item.style.boxShadow = `0 2px 8px rgba(76, 175, 80, 0.15)`
         }
         item.onmouseout = () => updateSelectedStyle()
 
@@ -1776,14 +1864,13 @@ export class CaptureService {
             // 按区块选择模式：整个区块作为一个可选择单元
             contentContainer.style.cssText += `
                 cursor: pointer;
-                color: #333;
+                color: ${colors.foreground};
                 font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
                 font-size: 13px;
                 line-height: 1.4;
                 white-space: pre-wrap;
-                word-break: break-all;
-                max-height: 120px;
-                overflow-y: auto;
+                overflow-wrap: break-word;
+                word-break: break-word;
             `
 
             // 直接显示原始区块内容
@@ -1816,9 +1903,10 @@ export class CaptureService {
                     font-size: 13px;
                     line-height: 1.4;
                     white-space: pre-wrap;
-                    word-break: break-all;
+                    overflow-wrap: break-word;
+                    word-break: break-word;
                     transition: all 0.2s ease;
-                    color: #333;
+                    color: ${colors.foreground};
                 `
                 lineElement.textContent = line || ' '
 
@@ -1831,13 +1919,13 @@ export class CaptureService {
                 // 设置行的高亮状态
                 const updateLineStyle = () => {
                     if (block.selectedLines![lineIndex]) {
-                        lineElement.style.backgroundColor = '#E8F5E8'
-                        lineElement.style.border = '1px solid #4CAF50'
-                        lineElement.style.color = '#2E7D32'
+                        lineElement.style.backgroundColor = colors.selectionBg
+                        lineElement.style.border = `1px solid ${colors.selectionBorder}`
+                        lineElement.style.color = colors.foreground
                     } else {
                         lineElement.style.backgroundColor = 'transparent'
                         lineElement.style.border = '1px solid transparent'
-                        lineElement.style.color = '#333'
+                        lineElement.style.color = colors.foreground
                     }
                 }
 
@@ -1867,9 +1955,9 @@ export class CaptureService {
                 contentContainer.appendChild(lineElement)
             })
 
-            // 设置容器的最大高度
-            contentContainer.style.maxHeight = '200px'
-            contentContainer.style.overflowY = 'auto'
+            // 移除高度限制，让区块根据内容自动调整高度
+            // contentContainer.style.maxHeight = '200px'
+            // contentContainer.style.overflowY = 'auto'
         }
 
         updateSelectedStyle()
@@ -1879,7 +1967,7 @@ export class CaptureService {
     }
 
     // 刷新区块显示（用于切换选择模式后重新渲染）
-    private refreshBlockDisplay(blocksList: HTMLElement, blocks: CaptureBlock[], modalFooter: HTMLElement): void {
+    private refreshBlockDisplay(blocksList: HTMLElement, blocks: CaptureBlock[], modalFooter: HTMLElement, themeColors?: any): void {
         console.log('🔄 正在刷新区块显示...')
 
         // 清空现有的区块列表
@@ -1909,7 +1997,7 @@ export class CaptureService {
                 delete block.selectedLines
             }
 
-            const blockItem = this.createBlockItem(block, i, blocksList, blocks)
+            const blockItem = this.createBlockItem(block, i, blocksList, blocks, themeColors)
             blocksList.appendChild(blockItem)
         }
 
@@ -1925,17 +2013,27 @@ export class CaptureService {
     }
 
     // 创建模态框按钮
-    private createModalButton(text: string, type: 'primary' | 'secondary' | 'success' | 'cancel', onClick: () => void): HTMLElement {
+    private createModalButton(text: string, type: 'primary' | 'secondary' | 'success' | 'cancel', onClick: () => void, themeColors?: any): HTMLElement {
         const button = document.createElement('button')
         button.textContent = text
         button.onclick = onClick
 
+        // 使用主题颜色
+        const colors = themeColors || {
+            primary: '#4CAF50',
+            success: '#28a745',
+            secondary: '#f5f5f5',
+            border: '#ddd',
+            foreground: '#333',
+            background: '#ffffff'
+        }
+
         const baseStyle = `
-            padding: 8px 16px;
+            padding: 6px 12px;
             border: none;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 500;
             transition: all 0.2s ease;
         `
@@ -1943,42 +2041,42 @@ export class CaptureService {
         switch (type) {
             case 'primary':
                 button.style.cssText = baseStyle + `
-                    background: #4CAF50;
+                    background: ${colors.primary};
                     color: white;
                 `
                 button.onmouseover = () => button.style.backgroundColor = '#45a049'
-                button.onmouseout = () => button.style.backgroundColor = '#4CAF50'
+                button.onmouseout = () => button.style.backgroundColor = colors.primary
                 break
             case 'secondary':
                 button.style.cssText = baseStyle + `
-                    background: #f5f5f5;
-                    color: #333;
-                    border: 1px solid #ddd;
+                    background: ${colors.secondary};
+                    color: ${colors.foreground};
+                    border: 1px solid ${colors.border};
                 `
                 button.onmouseover = () => {
                     button.style.backgroundColor = '#e8f5e8'
-                    button.style.borderColor = '#4CAF50'
+                    button.style.borderColor = colors.primary
                 }
                 button.onmouseout = () => {
-                    button.style.backgroundColor = '#f5f5f5'
-                    button.style.borderColor = '#ddd'
+                    button.style.backgroundColor = colors.secondary
+                    button.style.borderColor = colors.border
                 }
                 break
             case 'success':
                 button.style.cssText = baseStyle + `
-                    background: #4CAF50;
+                    background: ${colors.primary};
                     color: white;
                 `
                 button.onmouseover = () => button.style.backgroundColor = '#45a049'
-                button.onmouseout = () => button.style.backgroundColor = '#4CAF50'
+                button.onmouseout = () => button.style.backgroundColor = colors.primary
                 break
             case 'cancel':
                 button.style.cssText = baseStyle + `
-                    background: #f44336;
+                    background: ${colors.danger || '#f44336'};
                     color: white;
                 `
                 button.onmouseover = () => button.style.backgroundColor = '#d32f2f'
-                button.onmouseout = () => button.style.backgroundColor = '#f44336'
+                button.onmouseout = () => button.style.backgroundColor = colors.danger || '#f44336'
                 break
         }
 
