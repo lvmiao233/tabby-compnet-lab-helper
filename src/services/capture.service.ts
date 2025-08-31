@@ -1582,52 +1582,7 @@ export class CaptureService {
             color: ${themeColors.foreground};
         `
 
-        // 模态框头部
-        const modalHeader = document.createElement('div')
-        modalHeader.style.cssText = `
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 16px;
-            border-bottom: 1px solid ${themeColors.border};
-            background: ${themeColors.backgroundSecondary};
-            border-radius: 8px 8px 0 0;
-            color: ${themeColors.foreground};
-            min-height: 48px;
-        `
-
-        const title = document.createElement('h3')
-        title.textContent = '选择要导出的命令区块'
-        title.style.cssText = `
-            margin: 0;
-            color: ${themeColors.foreground};
-            font-size: 16px;
-            font-weight: 600;
-        `
-
-        const closeBtn = document.createElement('button')
-        closeBtn.textContent = '×'
-        closeBtn.style.cssText = `
-            background: none;
-            border: none;
-            font-size: 20px;
-            cursor: pointer;
-            color: ${themeColors.muted};
-            padding: 0;
-            width: 24px;
-            height: 24px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 50%;
-            transition: background-color 0.2s;
-        `
-        closeBtn.onmouseover = () => closeBtn.style.backgroundColor = '#e0e0e0'
-        closeBtn.onmouseout = () => closeBtn.style.backgroundColor = 'transparent'
-        closeBtn.onclick = () => this.closeModal(modalContainer)
-
-        modalHeader.appendChild(title)
-        modalHeader.appendChild(closeBtn)
+        // 移除模态框头部，所有功能合并到底部工具栏
 
         // 模态框主体
         const modalBody = document.createElement('div')
@@ -1637,15 +1592,7 @@ export class CaptureService {
             overflow-y: auto;
         `
 
-        // 统计信息
-        const stats = document.createElement('div')
-        stats.textContent = `共发现 ${blocks.length} 个命令区块`
-        stats.style.cssText = `
-            margin-bottom: 15px;
-            color: ${themeColors.muted};
-            font-size: 14px;
-        `
-        modalBody.appendChild(stats)
+        // 移除统计信息显示
 
         // 区块列表
         const blocksList = document.createElement('div')
@@ -1670,7 +1617,7 @@ export class CaptureService {
 
 
 
-        // 模态框底部
+        // 模态框底部工具栏
         const modalFooter = document.createElement('div')
         modalFooter.style.cssText = `
             display: flex;
@@ -1685,23 +1632,63 @@ export class CaptureService {
             min-height: 48px;
         `
 
-        const selectAllBtn = this.createModalButton('全选', 'secondary', () => {
-            if (this.selectionMode === 'line') {
-                // 行选择模式：选中所有行
-                blocks.forEach(block => {
-                    block.selected = true
-                    if (block.selectedLines) {
-                        block.selectedLines.fill(true)
-                    }
-                })
-            } else {
-                // 区块选择模式：选中所有区块
-                blocks.forEach(block => block.selected = true)
-            }
-            this.updateModalDisplay(blocksList, blocks, modalFooter)
-        }, themeColors)
+        // 左侧：标题文字
+        const leftSection = document.createElement('div')
+        leftSection.style.cssText = `
+            font-size: 14px;
+            font-weight: 600;
+            color: ${themeColors.foreground};
+        `
+        leftSection.textContent = '选择实验命令导出'
 
-        const clearAllBtn = this.createModalButton('清空', 'secondary', () => {
+        // 右侧：控制按钮
+        const rightSection = document.createElement('div')
+        rightSection.style.cssText = 'display: flex; gap: 8px; align-items: center;'
+
+        // 行选择/区块选择滑块
+        const modeSwitch = document.createElement('label')
+        modeSwitch.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: ${themeColors.muted};
+            cursor: pointer;
+            user-select: none;
+            margin-right: 8px;
+        `
+
+        const modeCheckbox = document.createElement('input')
+        modeCheckbox.type = 'checkbox'
+        modeCheckbox.checked = this.selectionMode === 'line'
+        modeCheckbox.style.cssText = `
+            width: 14px;
+            height: 14px;
+            cursor: pointer;
+        `
+
+        const modeLabel = document.createElement('span')
+        modeLabel.textContent = '按行选择'
+        modeLabel.style.cssText = 'font-weight: 500;'
+
+        modeCheckbox.onchange = () => {
+            const previousMode = this.selectionMode
+            this.selectionMode = modeCheckbox.checked ? 'line' : 'block'
+            console.log(`🔄 切换到${this.selectionMode === 'block' ? '按区块选择' : '按行选择'}模式`)
+
+            // 重新渲染区块列表以应用新的选择模式
+            this.refreshBlockDisplay(blocksList, blocks, modalFooter, themeColors)
+        }
+
+        modeSwitch.appendChild(modeCheckbox)
+        modeSwitch.appendChild(modeLabel)
+
+        // 清空按钮（SVG图标）
+        const clearBtn = this.createIconButton(`
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+        `, '清空', () => {
             if (this.selectionMode === 'line') {
                 // 行选择模式：取消选中所有行
                 blocks.forEach(block => {
@@ -1717,7 +1704,12 @@ export class CaptureService {
             this.updateModalDisplay(blocksList, blocks, modalFooter)
         }, themeColors)
 
-        const copyBtn = this.createModalButton('📋 复制到剪贴板', 'primary', () => {
+        // 复制到剪贴板按钮（SVG图标）
+        const copyBtn = this.createIconButton(`
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17,9H7V7H17M17,13H7V11H17M14,17H7V15H14M12,3A1,1 0 0,1 13,4V6H11V4A1,1 0 0,1 12,3M7,3A1,1 0 0,1 8,4V6H6V4A1,1 0 0,1 7,3M19,3H15V7H19M5,3H1V7H5M3,9H21V21H3V9Z"/>
+            </svg>
+        `, '复制到剪贴板', () => {
             let selectedBlocks = blocks.filter(block => block.selected)
 
             // 在行选择模式下，进一步筛选出真正有选中行的区块
@@ -1731,7 +1723,12 @@ export class CaptureService {
             // 不关闭窗口，让用户可以继续操作
         }, themeColors)
 
-        const downloadBtn = this.createModalButton('💾 下载并复制', 'success', () => {
+        // 下载并复制按钮（SVG图标）
+        const downloadBtn = this.createIconButton(`
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+            </svg>
+        `, '下载并复制', () => {
             let selectedBlocks = blocks.filter(block => block.selected)
 
             // 在行选择模式下，进一步筛选出真正有选中行的区块
@@ -1745,67 +1742,25 @@ export class CaptureService {
             this.closeModal(modalContainer)
         }, themeColors)
 
-        const cancelBtn = this.createModalButton('取消', 'cancel', () => {
+        // 关闭按钮（SVG图标）
+        const closeBtn = this.createIconButton(`
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+            </svg>
+        `, '关闭', () => {
             this.closeModal(modalContainer)
         }, themeColors)
 
-        // 左侧：全选、清空和行选择开关
-        const leftButtons = document.createElement('div')
-        leftButtons.style.cssText = 'display: flex; gap: 10px; align-items: center;'
+        rightSection.appendChild(modeSwitch)
+        rightSection.appendChild(clearBtn)
+        rightSection.appendChild(copyBtn)
+        rightSection.appendChild(downloadBtn)
+        rightSection.appendChild(closeBtn)
 
-        // 行选择开关
-        const lineSelectSwitch = document.createElement('label')
-        lineSelectSwitch.style.cssText = `
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 12px;
-            color: #666;
-            cursor: pointer;
-            user-select: none;
-        `
-
-        const lineSelectCheckbox = document.createElement('input')
-        lineSelectCheckbox.type = 'checkbox'
-        lineSelectCheckbox.checked = this.selectionMode === 'line'
-        lineSelectCheckbox.style.cssText = `
-            width: 14px;
-            height: 14px;
-            cursor: pointer;
-        `
-
-        const lineSelectLabel = document.createElement('span')
-        lineSelectLabel.textContent = '按行选择'
-        lineSelectLabel.style.cssText = 'font-weight: 500;'
-
-        lineSelectCheckbox.onchange = () => {
-            const previousMode = this.selectionMode
-            this.selectionMode = lineSelectCheckbox.checked ? 'line' : 'block'
-            console.log(`🔄 切换到${this.selectionMode === 'block' ? '按区块选择' : '按行选择'}模式`)
-
-            // 重新渲染区块列表以应用新的选择模式
-            this.refreshBlockDisplay(blocksList, blocks, modalFooter, themeColors)
-        }
-
-        lineSelectSwitch.appendChild(lineSelectCheckbox)
-        lineSelectSwitch.appendChild(lineSelectLabel)
-
-        leftButtons.appendChild(selectAllBtn)
-        leftButtons.appendChild(clearAllBtn)
-        leftButtons.appendChild(lineSelectSwitch)
-
-        // 右侧：操作按钮
-        const rightButtons = document.createElement('div')
-        rightButtons.style.cssText = 'display: flex; gap: 10px;'
-        rightButtons.appendChild(copyBtn)
-        rightButtons.appendChild(downloadBtn)
-        rightButtons.appendChild(cancelBtn)
-
-        modalFooter.appendChild(leftButtons)
-        modalFooter.appendChild(rightButtons)
+        modalFooter.appendChild(leftSection)
+        modalFooter.appendChild(rightSection)
 
         // 组装模态框
-        modalContent.appendChild(modalHeader)
         modalContent.appendChild(modalBody)
         modalContent.appendChild(modalFooter)
         modalContainer.appendChild(modalContent)
@@ -2102,17 +2057,8 @@ export class CaptureService {
             displayText = `${selectedCount} 个区块已选中`
         }
 
-        // 更新复制按钮文本 (第3个按钮)
-        const copyBtn = footer.querySelector('button:nth-child(3)') as HTMLButtonElement
-        if (copyBtn) {
-            copyBtn.textContent = `📋 复制到剪贴板`
-        }
-
-        // 更新下载按钮文本 (第4个按钮)
-        const downloadBtn = footer.querySelector('button:nth-child(4)') as HTMLButtonElement
-        if (downloadBtn) {
-            downloadBtn.textContent = `💾 下载并复制`
-        }
+        // 不再更新按钮文本，保持SVG图标
+        // 按钮现在使用SVG图标，不需要动态更新文字
 
         console.log(`🔄 更新模态框显示: ${displayText}`)
     }
@@ -2123,6 +2069,57 @@ export class CaptureService {
             modal.parentNode.removeChild(modal)
             console.log('🪟 区块选择窗口已关闭')
         }
+    }
+
+    // 创建图标按钮（只有图标，没有文字）
+    private createIconButton(icon: string, title: string, onClick: () => void, themeColors?: any): HTMLElement {
+        const button = document.createElement('button')
+        button.innerHTML = icon
+        button.title = title
+        button.onclick = onClick
+
+        // 使用主题颜色
+        const colors = themeColors || {
+            primary: '#4CAF50',
+            secondary: '#f5f5f5',
+            success: '#28a745',
+            danger: '#dc3545',
+            border: '#ddd',
+            foreground: '#333',
+            background: '#ffffff',
+            muted: '#6c757d'
+        }
+
+        const baseStyle = `
+            width: 28px;
+            height: 28px;
+            border: 1px solid ${colors.border};
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            background: transparent;
+            color: ${colors.foreground};
+            padding: 0;
+        `
+
+        button.style.cssText = baseStyle
+
+        button.onmouseover = () => {
+            button.style.backgroundColor = 'rgba(76, 175, 80, 0.1)'
+            button.style.borderColor = colors.primary
+            button.style.color = colors.primary
+        }
+        button.onmouseout = () => {
+            button.style.backgroundColor = 'transparent'
+            button.style.borderColor = colors.border
+            button.style.color = colors.foreground
+        }
+
+        return button
     }
 
     // 使用选择的区块完成捕获
