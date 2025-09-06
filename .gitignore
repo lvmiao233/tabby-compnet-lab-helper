@@ -9,6 +9,9 @@ dist/
 build/
 *.tsbuildinfo
 
+# Release artifacts
+*.zip
+
 # IDE and editor files
 .vscode/
 .idea/

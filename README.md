@@ -265,6 +265,46 @@ npm run build:prod
 
 ## 🛠️ 开发说明
 
+### 📦 打包和发布
+
+#### 本地打包
+```bash
+# 安装依赖
+npm install
+
+# 构建和打包
+npm run pack
+```
+
+打包完成后会在项目根目录生成 `tabby-compnet-lab-helper-v{版本号}.zip` 文件。
+
+#### 自动发布流程
+
+项目配置了 GitHub Actions 自动发布流程：
+
+1. **推送标签**：当推送 `v*` 格式的标签时，自动触发发布流程
+2. **自动构建**：GitHub Actions 会自动安装依赖并构建项目
+3. **自动打包**：运行 `npm run pack` 生成发布包
+4. **创建发布**：自动创建 GitHub Release
+5. **上传文件**：将生成的 zip 文件上传到 Release 中
+
+#### 发布新版本的步骤
+
+```bash
+# 1. 更新版本号
+npm version patch  # 或 minor, major
+
+# 2. 提交更改
+git add .
+git commit -m "chore: bump version to vX.X.X"
+
+# 3. 推送标签（这会触发自动发布）
+git tag vX.X.X
+git push origin main --tags
+```
+
+发布完成后，访问 [GitHub Releases](https://github.com/lvmiao233/tabby-compnet-lab-helper/releases) 即可下载最新的 zip 包。
+
 ### 项目结构
 ```
 tabby-compnet-lab-helper/
