@@ -1,6 +1,6 @@
 {
   "name": "tabby-compnet-lab-helper",
-  "version": "0.2.17",
+  "version": "0.2.18",
   "description": "Tabby Compnet Lab Helper - GNS3实验助手",
   "keywords": [
     "tabby-plugin"
@@ -24,6 +24,7 @@
     "archiver": "^7.0.1",
     "rxjs": "^7",
     "tabby-core": "*",
+    "ts-loader": "^9.5.1",
     "typescript": "^4",
     "webpack": "^5",
     "webpack-cli": "^5"
