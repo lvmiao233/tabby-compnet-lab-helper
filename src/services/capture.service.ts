@@ -2162,7 +2162,7 @@ export class CaptureService {
 
     // 导出选中区块为图片
     private exportSelectedBlocksToImage(blocks: CaptureBlock[]): void {
-        console.log(`%c🖼️ NettyTabby图片导出开始`, 'background: #4CAF50; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
+        console.log(`%c🖼️ Tabby Compnet Lab Helper图片导出开始`, 'background: #4CAF50; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold')
         console.log(`📊 准备导出 ${blocks.length} 个命令区块`)
 
         if (blocks.length === 0) {

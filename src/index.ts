@@ -30,6 +30,6 @@ export class NettyToolbarButtonProvider extends ToolbarButtonProvider {
 })
 export default class NettyPluginModule {
     constructor() {
-        console.log('🚀 NettyTabby插件已加载 - 终端底部状态栏模式')
+        console.log('🚀 Tabby Compnet Lab Helper插件已加载')
     }
 }

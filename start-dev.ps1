@@ -1,6 +1,6 @@
-# NettyTabby插件开发启动脚本
+# Tabby Compnet Lab Helper插件开发启动脚本
 
-Write-Host "🚀 NettyTabby插件开发启动脚本" -ForegroundColor Green
+Write-Host "🚀 Tabby Compnet Lab Helper插件开发启动脚本" -ForegroundColor Green
 Write-Host "=================================" -ForegroundColor Green
 
 # 检查插件是否已构建

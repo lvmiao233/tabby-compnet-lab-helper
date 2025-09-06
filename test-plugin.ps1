@@ -1,6 +1,6 @@
-# NettyTabby插件测试脚本
+# Tabby Compnet Lab Helper插件测试脚本
 
-Write-Host "🚀 NettyTabby插件测试脚本" -ForegroundColor Green
+Write-Host "🚀 Tabby Compnet Lab Helper插件测试脚本" -ForegroundColor Green
 Write-Host "=================================" -ForegroundColor Green
 
 # 获取插件目录的绝对路径
