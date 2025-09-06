@@ -631,72 +631,63 @@ export class CaptureService {
     // 识别命令交互区块
     private identifyCommandBlocks(lines: string[]): CaptureBlock[] {
         const blocks: CaptureBlock[] = []
-        let currentBlock: { start: number, lines: string[] } | null = null
+        let pendingBlock: { start: number, lines: string[] } | null = null
 
-        // 简化的提示符检测：基于模式匹配而不是复杂正则
-        // 这个方法会更可靠，因为不依赖于复杂的正则表达式
-
-        console.log('🔍 开始详细分析每一行...')
+        console.log('🔍 开始分析命令交互区块...')
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i]
             const isPrompt = this.isPromptLineSimple(line)
 
-            console.log(`🔍 行 ${i}: "${line}" -> ${isPrompt ? '是提示符' : '不是提示符'}`)
-
             if (isPrompt) {
-                // 如果有正在处理的区块，先保存
-                if (currentBlock && currentBlock.lines.length > 0) {
-                    // 保存前一个区块
-                    blocks.push({
-                        id: `block-${blocks.length}`,
-                        lineStart: currentBlock.start,
-                        lineEnd: i - 1,
-                        content: currentBlock.lines.join('\n'),
-                        selected: false,
-                        command: this.extractCommand(currentBlock.lines),
-                        output: this.extractOutput(currentBlock.lines)
-                    })
-                    console.log(`📦 保存区块: 行 ${currentBlock.start}-${i-1}`)
+                // 遇到提示符：检查前一个区块是否有内容
+                if (pendingBlock && pendingBlock.lines.length > 1) {
+                    // 有实际命令内容，创建区块
+                    blocks.push(this.createBlockFromPending(pendingBlock, blocks.length))
                 }
 
-                // 开始新的区块
-                currentBlock = {
+                // 开始新的潜在区块
+                pendingBlock = {
                     start: i,
                     lines: [line]
                 }
-            } else if (currentBlock) {
-                // 继续当前区块
-                currentBlock.lines.push(line)
+            } else if (pendingBlock) {
+                // 继续累积当前潜在区块的内容
+                pendingBlock.lines.push(line)
             } else {
-                // 如果是第一行且不是提示符，开始新区块
-                currentBlock = {
+                // 第一行不是提示符，创建一个临时的容器来累积内容
+                pendingBlock = {
                     start: i,
                     lines: [line]
                 }
             }
         }
 
-        // 保存最后一个区块
-        if (currentBlock && currentBlock.lines.length > 0) {
-            const hasCommandContent = currentBlock.lines.some(l =>
-                !this.isPromptLineSimple(l) && l.trim().length > 0
+        // 处理最后一个潜在区块
+        if (pendingBlock && pendingBlock.lines.length > 0) {
+            // 检查是否有实际内容（不仅仅是提示符）
+            const hasActualContent = pendingBlock.lines.some((line, index) =>
+                index > 0 && line.trim().length > 0 && !this.isPromptLineSimple(line)
             )
 
-            if (hasCommandContent) {
-                blocks.push({
-                    id: `block-${blocks.length}`,
-                    lineStart: currentBlock.start,
-                    lineEnd: lines.length - 1,
-                    content: currentBlock.lines.join('\n'),
-                    selected: false,
-                    command: this.extractCommand(currentBlock.lines),
-                    output: this.extractOutput(currentBlock.lines)
-                })
-                console.log(`📦 保存最后一个区块: 行 ${currentBlock.start}-${lines.length-1}`)
+            if (hasActualContent) {
+                blocks.push(this.createBlockFromPending(pendingBlock, blocks.length))
             }
         }
 
         return blocks
+    }
+
+    // 从潜在区块创建实际的CaptureBlock
+    private createBlockFromPending(pendingBlock: { start: number, lines: string[] }, blockIndex: number): CaptureBlock {
+        return {
+            id: `block-${blockIndex}`,
+            lineStart: pendingBlock.start,
+            lineEnd: pendingBlock.start + pendingBlock.lines.length - 1,
+            content: pendingBlock.lines.join('\n'),
+            selected: false,
+            command: this.extractCommand(pendingBlock.lines),
+            output: this.extractOutput(pendingBlock.lines)
+        }
     }
 
     // 提取命令部分
@@ -730,41 +721,50 @@ export class CaptureService {
         return outputLines.length > 0 ? outputLines.join('\n') : undefined
     }
 
-    // 简化的提示符检测方法（解决方案A）
+    // Cisco提示符检测方法 - 检查行是否包含提示符（开头）
     private isPromptLineSimple(line: string): boolean {
         const trimmed = line.trim()
 
-        // 方法1: 基于关键词的简单识别
+        // 如果行为空，肯定不是提示符
+        if (!trimmed) {
+            return false
+        }
+
+        // Cisco设备提示符特征检测
+        // 检查行是否以Cisco提示符开头
+        
+        // 模式1: hostname# 或 hostname> (后面可能跟命令)
+        const basicPromptMatch = trimmed.match(/^([a-zA-Z0-9_-]+)([>#])/)
+        if (basicPromptMatch) {
+            return true
+        }
+        
+        // 模式2: hostname(config)# 或 hostname(config-xxx)# (后面可能跟命令)
+        const configPromptMatch = trimmed.match(/^([a-zA-Z0-9_-]+)\([^)]*config[^)]*\)([>#])/)
+        if (configPromptMatch) {
+            return true
+        }
+
+        // 通用提示符检测（作为备选）
         if (trimmed.includes('>') && (
             trimmed.includes(':\\') ||  // Windows路径: C:\, D:\CompNetDocRefactor>
             trimmed.includes('$ ') ||   // Unix提示符: user@host: $
             trimmed.includes('# ') ||   // 管理员提示符: root@host: #
-            trimmed.endsWith('>')       // 通用提示符结尾
+            trimmed.match(/^[^>]*>/)    // 以提示符开头
         )) {
             return true
         }
 
-        // 方法2: 基于位置的识别
-        const promptIndicators = ['>', '#', '$']
-        const lastChar = trimmed.slice(-1)
-        if (promptIndicators.includes(lastChar)) {
-            // 检查前面是否有路径或命令提示
-            const beforePrompt = trimmed.slice(0, -1).trim()
+        // Unix/Linux风格提示符检测
+        if (trimmed.match(/^[^#$]*[#$]/)) {
+            const beforePrompt = trimmed.split(/[#$]/)[0].trim()
             if (beforePrompt.length > 0) {
-                // Windows路径模式: X:\path\to\dir
-                if (/^[A-Za-z]:/.test(beforePrompt)) {
-                    return true
-                }
                 // SSH/Unix模式: user@host:/path
                 if (beforePrompt.includes('@') || beforePrompt.includes(':')) {
                     return true
                 }
                 // 简单的路径模式: /path/to/dir
                 if (beforePrompt.includes('/') || beforePrompt.includes('\\')) {
-                    return true
-                }
-                // 简单的名称模式: name
-                if (beforePrompt.length > 0 && !beforePrompt.includes(' ')) {
                     return true
                 }
             }
