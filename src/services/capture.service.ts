@@ -1637,6 +1637,8 @@ export class CaptureService {
 
             this.downloadBlocksAndCopy(selectedBlocks)
             this.closeModal(modalContainer)
+            // 关闭模态框时自动退出捕获模式
+            this.toggleCaptureMode()
         }, themeColors)
 
         // 标记编辑按钮（SVG图标）
@@ -1691,6 +1693,15 @@ export class CaptureService {
 
         // 添加到页面
         document.body.appendChild(modalContainer)
+
+        // 点击遮罩层关闭
+        modalContainer.onclick = (e) => {
+            if (e.target === modalContainer) {
+                this.closeModal(modalContainer)
+                // 关闭模态框时自动退出捕获模式
+                this.toggleCaptureMode()
+            }
+        }
 
         // 初始更新按钮文本
         this.updateModalDisplay(blocksList, blocks, modalFooter)
@@ -3891,7 +3902,10 @@ export class CaptureService {
             modalContainer.parentNode.removeChild(modalContainer)
         }
 
-        console.log('🎨 标记编辑器已关闭，所有状态已清理')
+        // 关闭标记编辑器时自动退出捕获模式
+        this.toggleCaptureMode()
+
+        console.log('🎨 标记编辑器已关闭，所有状态已清理，捕获模式已退出')
     }
 
 }
