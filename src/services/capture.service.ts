@@ -1,6 +1,7 @@
 import { Injectable, NgZone, Injector, Component } from '@angular/core'
 import { BehaviorSubject, Observable } from 'rxjs'
 import { AppService, ThemesService } from 'tabby-core'
+const fabric = require('fabric').fabric
 
 // xterm.js类型定义
 interface IBuffer {
@@ -1638,6 +1639,30 @@ export class CaptureService {
             this.closeModal(modalContainer)
         }, themeColors)
 
+        // 标记编辑按钮（SVG图标）
+        const markupBtn = this.createIconButton(`
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M20.71,4.63L19.37,3.29C19,2.9 18.35,2.9 17.96,3.29L9,12.25L11.75,15L20.71,6.04C21.1,5.65 21.1,5 20.71,4.63M7,14A3,3 0 0,0 4,17C4,18.31 2.84,19 2,19C2.92,20.22 4.5,21 6,21A4,4 0 0,0 10,17A3,3 0 0,0 7,14Z"/>
+            </svg>
+        `, '标记编辑', () => {
+            let selectedBlocks = blocks.filter(block => block.selected)
+
+            // 在行选择模式下，进一步筛选出真正有选中行的区块
+            if (this.selectionMode === 'line') {
+                selectedBlocks = selectedBlocks.filter(block =>
+                    block.selectedLines && block.selectedLines.some(selected => selected)
+                )
+            }
+
+            if (selectedBlocks.length === 0) {
+                console.warn('⚠️ 没有选中的区块，无法进行标记编辑')
+                return
+            }
+
+            this.openMarkupEditor(selectedBlocks)
+            this.closeModal(modalContainer)
+        }, themeColors)
+
         // 关闭按钮（SVG图标）
         const closeBtn = this.createIconButton(`
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -1653,6 +1678,7 @@ export class CaptureService {
         rightSection.appendChild(clearBtn)
         rightSection.appendChild(copyBtn)
         rightSection.appendChild(downloadBtn)
+        rightSection.appendChild(markupBtn)
         rightSection.appendChild(closeBtn)
 
         modalFooter.appendChild(leftSection)
@@ -2430,10 +2456,12 @@ export class CaptureService {
     }
 
     // 执行实际的下载操作
-    private async performDownload(blob: Blob, blockCount: number): Promise<void> {
+    private async performDownload(blob: Blob, blockCount: number, isMarkupImage: boolean = false): Promise<void> {
         try {
             const timestamp = new Date().getTime()
-            const filename = `netty-commands-${timestamp}-${blockCount}-blocks.png`
+            const filename = isMarkupImage 
+                ? `terminal-commands-marked-${timestamp}-${blockCount}-blocks.png`
+                : `netty-commands-${timestamp}-${blockCount}-blocks.png`
 
             // 检查是否有Electron API可用
             if (this.electronAPI) {
@@ -3078,4 +3106,792 @@ export class CaptureService {
 
         console.log('🎯 导出选项窗口已显示')
     }
+
+    // 打开标记编辑器
+    private openMarkupEditor(blocks: CaptureBlock[]): void {
+        console.log(`🎨 打开标记编辑器，处理 ${blocks.length} 个区块`)
+        
+        // 首先生成原始图片
+        this.generateBaseImageForMarkup(blocks)
+    }
+
+    // 为标记编辑生成基础图片
+    private generateBaseImageForMarkup(blocks: CaptureBlock[]): void {
+        try {
+            // 创建HTML内容
+            const htmlContent = this.generateTerminalHTML(blocks)
+            
+            // 创建隐藏的渲染容器
+            const renderContainer = this.createRenderContainer(htmlContent)
+            
+            // 等待渲染完成后创建标记编辑器
+            setTimeout(() => {
+                const contentElement = renderContainer.querySelector('.terminal-commands') as HTMLElement
+                if (contentElement) {
+                    contentElement.offsetHeight // 强制重新计算布局
+                }
+                
+                this.renderHTMLToImage(renderContainer, blocks.length)
+                    .then(blob => {
+                        if (blob) {
+                            this.createMarkupEditor(blob, blocks)
+                        }
+                    })
+                    .catch(error => {
+                        console.error('❌ 生成基础图片失败:', error)
+                    })
+                    .finally(() => {
+                        // 清理渲染容器
+                        if (renderContainer.parentNode) {
+                            renderContainer.parentNode.removeChild(renderContainer)
+                        }
+                    })
+            }, 100)
+            
+        } catch (error) {
+            console.error('❌ 生成基础图片初始化失败:', error)
+        }
+    }
+
+    // 创建标记编辑器界面
+    private createMarkupEditor(imageBlob: Blob, originalBlocks: CaptureBlock[]): void {
+        console.log('🎨 创建标记编辑器界面')
+        
+        // 创建模态框容器
+        const modalContainer = document.createElement('div')
+        modalContainer.className = 'netty-markup-modal'
+        modalContainer.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+        `
+
+        // 创建模态框内容
+        const modalContent = document.createElement('div')
+        modalContent.style.cssText = `
+            background: #2d2d2d;
+            border-radius: 8px;
+            width: 90vw;
+            height: 90vh;
+            display: flex;
+            flex-direction: column;
+            max-width: 1200px;
+            max-height: 800px;
+        `
+
+        // 画布容器
+        const canvasContainer = document.createElement('div')
+        canvasContainer.style.cssText = `
+            flex: 1;
+            padding: 20px;
+            overflow: auto;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #404040;
+        `
+
+        // 底部工具栏（合并工具和操作按钮）
+        const toolbar = document.createElement('div')
+        toolbar.style.cssText = `
+            padding: 15px 20px;
+            border-top: 1px solid #444;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            background: #363636;
+            justify-content: space-between;
+        `
+        
+        // 创建合并的工具栏
+        this.createCombinedToolbar(toolbar, originalBlocks)
+
+        // 组装模态框
+        modalContent.appendChild(canvasContainer)
+        modalContent.appendChild(toolbar)
+        modalContainer.appendChild(modalContent)
+
+        // 添加到页面
+        document.body.appendChild(modalContainer)
+
+        // 初始化Fabric.js画布
+        this.initializeFabricCanvas(canvasContainer, imageBlob, originalBlocks, modalContainer)
+
+        // 点击遮罩层关闭
+        modalContainer.onclick = (e) => {
+            if (e.target === modalContainer) {
+                this.closeMarkupEditor(modalContainer)
+            }
+        }
+    }
+
+    // 创建合并的工具栏（工具+操作按钮）
+    private createCombinedToolbar(toolbar: HTMLElement, originalBlocks: CaptureBlock[]): void {
+        // 当前选中的工具和颜色
+        let selectedTool = 'select'
+        let selectedColor = '#ee0000'
+
+        // 工具按钮样式
+        const toolButtonStyle = `
+            padding: 10px;
+            border: 1px solid #666;
+            background: #2d2d2d;
+            color: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+        `
+
+        const activeToolStyle = `
+            background: #007acc;
+            border-color: #007acc;
+        `
+
+        const actionButtonStyle = `
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+        `
+
+        // 左侧工具区
+        const leftSection = document.createElement('div')
+        leftSection.style.cssText = `
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        `
+
+        // 选择工具
+        const selectBtn = document.createElement('button')
+        selectBtn.innerHTML = `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M13.64,21.97C13.14,22.21 12.54,22 12.31,21.5L10.13,16.76L7.62,18.78C7.45,18.92 7.24,19 7,19A1,1 0 0,1 6,18V3A1,1 0 0,1 7,2C7.24,2 7.47,2.09 7.64,2.23L7.65,2.22L19.14,11.86C19.57,12.22 19.62,12.85 19.27,13.27C19.12,13.45 18.91,13.57 18.7,13.61L15.54,14.23L17.74,18.96C18,19.46 17.76,20.05 17.26,20.28L13.64,21.97Z"/>
+            </svg>
+        `
+        selectBtn.title = '选择'
+        selectBtn.style.cssText = toolButtonStyle + activeToolStyle
+        selectBtn.dataset.tool = 'select'
+
+        // 下划线工具
+        const underlineBtn = document.createElement('button')
+        underlineBtn.innerHTML = `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M5,21H19V19H5V21M12,17A6,6 0 0,0 18,11V3H15.5V11A3.5,3.5 0 0,1 12,14.5A3.5,3.5 0 0,1 8.5,11V3H6V11A6,6 0 0,0 12,17Z"/>
+            </svg>
+        `
+        underlineBtn.title = '下划线'
+        underlineBtn.style.cssText = toolButtonStyle
+        underlineBtn.dataset.tool = 'underline'
+
+        // 矩形框选工具
+        const rectangleBtn = document.createElement('button')
+        rectangleBtn.innerHTML = `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M2,2V8H4V4H8V2H2M2,16V22H8V20H4V16H2M16,2V4H20V8H22V2H16M20,16V20H16V22H22V16H20Z"/>
+            </svg>
+        `
+        rectangleBtn.title = '框选'
+        rectangleBtn.style.cssText = toolButtonStyle
+        rectangleBtn.dataset.tool = 'rectangle'
+
+        // 删除按钮
+        const deleteBtn = document.createElement('button')
+        deleteBtn.innerHTML = `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/>
+            </svg>
+        `
+        deleteBtn.title = '删除选中'
+        deleteBtn.style.cssText = toolButtonStyle + `
+            margin-left: 15px;
+        `
+        deleteBtn.onclick = () => {
+            this.deleteSelectedMarkup()
+        }
+
+        // 颜色选择器容器
+        const colorContainer = document.createElement('div')
+        colorContainer.style.cssText = `
+            display: flex;
+            gap: 5px;
+            align-items: center;
+            margin-left: 20px;
+        `
+
+        // 预设颜色
+        const colors = [
+            { name: '红色', value: '#ee0000' },
+            { name: '橙色', value: '#ffc000' },
+            { name: '黄色', value: '#ffff00' },
+            { name: '浅绿色', value: '#92d050' },
+            { name: '绿色', value: '#00b050' },
+            { name: '浅蓝色', value: '#00b0f0' },
+            { name: '蓝色', value: '#0070c0' },
+            { name: '紫色', value: '#7030a0' }
+        ]
+
+        const colorButtonStyle = `
+            width: 28px;
+            height: 28px;
+            border: 2px solid #666;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 0 2px;
+            transition: all 0.2s;
+        `
+
+        const activeColorStyle = `
+            border-color: #fff;
+            box-shadow: 0 0 0 2px #007acc;
+        `
+
+        colors.forEach((color, index) => {
+            const colorBtn = document.createElement('button')
+            colorBtn.style.cssText = colorButtonStyle + `background: ${color.value};`
+            colorBtn.title = color.name
+            colorBtn.dataset.color = color.value
+            
+            if (index === 0) { // 默认选中红色
+                colorBtn.style.cssText += activeColorStyle
+            }
+
+            colorBtn.onclick = () => {
+                // 更新选中状态
+                colorContainer.querySelectorAll('button').forEach(btn => {
+                    btn.style.borderColor = '#666'
+                    btn.style.boxShadow = 'none'
+                })
+                colorBtn.style.borderColor = '#fff'
+                colorBtn.style.boxShadow = '0 0 0 2px #007acc'
+                
+                selectedColor = color.value
+                this.updateMarkupTool(selectedTool, selectedColor)
+            }
+
+            colorContainer.appendChild(colorBtn)
+        })
+
+        // 工具切换事件
+        const toolButtons = [selectBtn, underlineBtn, rectangleBtn]
+        toolButtons.forEach(btn => {
+            btn.onclick = () => {
+                // 更新按钮状态
+                toolButtons.forEach(b => b.style.cssText = toolButtonStyle)
+                btn.style.cssText = toolButtonStyle + activeToolStyle
+                
+                selectedTool = btn.dataset.tool!
+                this.updateMarkupTool(selectedTool, selectedColor)
+            }
+        })
+
+        // 右侧操作区
+        const rightSection = document.createElement('div')
+        rightSection.style.cssText = `
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        `
+
+        // 复制到剪贴板按钮
+        const copyBtn = document.createElement('button')
+        copyBtn.innerHTML = `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z"/>
+            </svg>
+        `
+        copyBtn.title = '复制到剪贴板'
+        copyBtn.style.cssText = actionButtonStyle + `
+            background: #4CAF50;
+            color: white;
+        `
+        copyBtn.onclick = () => {
+            this.exportMarkupImage(false, originalBlocks)
+        }
+
+        // 下载按钮
+        const downloadBtn = document.createElement('button')
+        downloadBtn.innerHTML = `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+            </svg>
+        `
+        downloadBtn.title = '下载'
+        downloadBtn.style.cssText = actionButtonStyle + `
+            background: #2196F3;
+            color: white;
+        `
+        downloadBtn.onclick = () => {
+            this.exportMarkupImage(true, originalBlocks)
+        }
+
+        // 关闭按钮
+        const closeBtn = document.createElement('button')
+        closeBtn.innerHTML = `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+            </svg>
+        `
+        closeBtn.title = '关闭'
+        closeBtn.style.cssText = actionButtonStyle + `
+            background: #666;
+            color: white;
+        `
+        closeBtn.onclick = () => {
+            this.closeMarkupEditor(toolbar.closest('.netty-markup-modal') as HTMLElement)
+        }
+
+        // 组装工具栏
+        leftSection.appendChild(selectBtn)
+        leftSection.appendChild(underlineBtn)
+        leftSection.appendChild(rectangleBtn)
+        leftSection.appendChild(deleteBtn)
+        leftSection.appendChild(colorContainer)
+
+        rightSection.appendChild(copyBtn)
+        rightSection.appendChild(downloadBtn)
+        rightSection.appendChild(closeBtn)
+
+        toolbar.appendChild(leftSection)
+        toolbar.appendChild(rightSection)
+
+        // 存储当前选择
+        toolbar.dataset.selectedTool = selectedTool
+        toolbar.dataset.selectedColor = selectedColor
+    }
+
+    // 当前Fabric画布实例
+    private currentFabricCanvas: any = null
+    
+    // 临时预览对象
+    private currentPreviewObject: any = null
+    
+    // 当前工具状态
+    private currentTool: string = 'select'
+    private currentColor: string = '#ee0000'
+    private isDrawing: boolean = false
+
+    // 初始化Fabric.js画布
+    private initializeFabricCanvas(container: HTMLElement, imageBlob: Blob, originalBlocks: CaptureBlock[], modalContainer: HTMLElement): void {
+        // 创建canvas元素
+        const canvasElement = document.createElement('canvas')
+        canvasElement.id = 'markup-canvas'
+        container.appendChild(canvasElement)
+
+        // 将Blob转换为图片URL
+        const imageUrl = URL.createObjectURL(imageBlob)
+        
+        // 加载图片并初始化画布
+        fabric.Image.fromURL(imageUrl, (img: any) => {
+            // 获取容器尺寸
+            const containerRect = container.getBoundingClientRect()
+            const containerWidth = containerRect.width - 40  // 减去padding
+            const containerHeight = containerRect.height - 40
+
+            // 计算缩放比例，使图片适应容器（90%填充，不溢出）
+            const scaleX = (containerWidth * 0.9) / img.width
+            const scaleY = (containerHeight * 0.9) / img.height
+            const scale = Math.min(scaleX, scaleY, 1) // 不放大，只缩小
+
+            // 计算缩放后的尺寸
+            const scaledWidth = img.width * scale
+            const scaledHeight = img.height * scale
+
+            // 创建画布，使用缩放后的尺寸
+            const canvas = new fabric.Canvas('markup-canvas', {
+                width: scaledWidth,
+                height: scaledHeight,
+                backgroundColor: '#fff'
+            })
+
+            // 设置图片为背景（缩放并居中）
+            img.set({
+                left: 0,
+                top: 0,
+                scaleX: scale,
+                scaleY: scale,
+                selectable: false,
+                evented: false
+            })
+            
+            canvas.add(img)
+            canvas.sendToBack(img)
+
+            // 存储画布实例和缩放比例
+            this.currentFabricCanvas = canvas
+            this.currentFabricCanvas.imageScale = scale // 存储缩放比例供后续使用
+
+            // 设置默认工具模式
+            this.updateMarkupTool('select', '#ee0000')
+
+            console.log(`✅ Fabric.js 画布初始化完成，图片缩放比例: ${scale.toFixed(2)}`)
+        })
+    }
+
+    // 清理所有事件监听器和临时对象
+    private clearAllEventListeners(): void {
+        if (!this.currentFabricCanvas) return
+
+        // 清理所有绘制相关事件
+        this.currentFabricCanvas.off('mouse:down')
+        this.currentFabricCanvas.off('mouse:up')
+        this.currentFabricCanvas.off('mouse:move')
+
+        // 清理临时预览对象
+        if (this.currentPreviewObject) {
+            this.currentFabricCanvas.remove(this.currentPreviewObject)
+            this.currentPreviewObject = null
+        }
+
+        // 重置绘制状态
+        this.isDrawing = false
+        
+        console.log('🧹 已清理所有事件监听器和临时对象')
+    }
+
+    // 更新标记工具
+    private updateMarkupTool(tool: string, color: string): void {
+        if (!this.currentFabricCanvas) return
+
+        console.log(`🎨 切换到工具: ${tool}, 颜色: ${color}`)
+
+        // 先清理所有现有事件和临时对象
+        this.clearAllEventListeners()
+
+        // 更新当前工具状态
+        this.currentTool = tool
+        this.currentColor = color
+
+        // 重置画布模式
+        this.currentFabricCanvas.isDrawingMode = false
+        this.currentFabricCanvas.selection = tool === 'select'
+        this.currentFabricCanvas.defaultCursor = tool === 'select' ? 'default' : 'crosshair'
+
+        // 根据工具类型设置不同的交互模式
+        if (tool === 'underline') {
+            this.enableUnderlineMode(color)
+        } else if (tool === 'rectangle') {
+            this.enableRectangleMode(color)
+        } else {
+            // 选择模式
+            this.enableSelectMode()
+        }
+    }
+
+    // 启用下划线模式
+    private enableUnderlineMode(color: string): void {
+        if (!this.currentFabricCanvas) return
+
+        let startPos: any
+
+        // 鼠标按下：开始绘制
+        this.currentFabricCanvas.on('mouse:down', (e: any) => {
+            if (!e.pointer) return
+            this.isDrawing = true
+            startPos = e.pointer
+
+            // 创建预览线条
+            this.currentPreviewObject = new fabric.Line([startPos.x, startPos.y, startPos.x, startPos.y], {
+                stroke: color,
+                strokeWidth: 3,
+                strokeDashArray: [5, 5], // 虚线预览
+                opacity: 0.6,
+                selectable: false,
+                evented: false
+            })
+
+            this.currentFabricCanvas.add(this.currentPreviewObject)
+            this.currentFabricCanvas.renderAll()
+        })
+
+        // 鼠标移动：实时预览
+        this.currentFabricCanvas.on('mouse:move', (e: any) => {
+            if (!this.isDrawing || !e.pointer || !this.currentPreviewObject) return
+
+            // 应用角度限制：水平或垂直
+            const constrainedPos = this.constrainLineAngle(startPos, e.pointer)
+
+            // 更新预览线条
+            this.currentPreviewObject.set({
+                x2: constrainedPos.x,
+                y2: constrainedPos.y
+            })
+
+            this.currentFabricCanvas.renderAll()
+        })
+
+        // 鼠标松开：完成绘制
+        this.currentFabricCanvas.on('mouse:up', (e: any) => {
+            if (!this.isDrawing || !e.pointer) return
+            this.isDrawing = false
+
+            // 移除预览对象
+            if (this.currentPreviewObject) {
+                this.currentFabricCanvas.remove(this.currentPreviewObject)
+            }
+
+            // 应用角度限制
+            const constrainedPos = this.constrainLineAngle(startPos, e.pointer)
+
+            // 只有当线条有足够长度时才创建
+            const minLength = 10
+            const length = Math.sqrt(Math.pow(constrainedPos.x - startPos.x, 2) + Math.pow(constrainedPos.y - startPos.y, 2))
+            
+            if (length >= minLength) {
+                // 创建正式的下划线
+                const line = new fabric.Line([startPos.x, startPos.y, constrainedPos.x, constrainedPos.y], {
+                    stroke: color,
+                    strokeWidth: 3,
+                    selectable: true,
+                    hasControls: false, // 禁用控制点以避免变形
+                    hasBorders: true
+                })
+
+                this.currentFabricCanvas.add(line)
+            }
+
+            this.currentPreviewObject = null
+            this.currentFabricCanvas.renderAll()
+        })
+    }
+
+    // 限制线条角度：只允许水平或垂直
+    private constrainLineAngle(startPos: any, currentPos: any): any {
+        const deltaX = Math.abs(currentPos.x - startPos.x)
+        const deltaY = Math.abs(currentPos.y - startPos.y)
+
+        // 选择变化更大的方向作为主方向
+        if (deltaX > deltaY) {
+            // 水平线：固定Y坐标
+            return {
+                x: currentPos.x,
+                y: startPos.y
+            }
+        } else {
+            // 垂直线：固定X坐标
+            return {
+                x: startPos.x,
+                y: currentPos.y
+            }
+        }
+    }
+
+    // 启用矩形框选模式
+    private enableRectangleMode(color: string): void {
+        if (!this.currentFabricCanvas) return
+
+        let startPos: any
+
+        // 鼠标按下：开始绘制
+        this.currentFabricCanvas.on('mouse:down', (e: any) => {
+            if (!e.pointer) return
+            this.isDrawing = true
+            startPos = e.pointer
+
+            // 创建预览矩形
+            this.currentPreviewObject = new fabric.Rect({
+                left: startPos.x,
+                top: startPos.y,
+                width: 0,
+                height: 0,
+                fill: 'transparent',
+                stroke: color,
+                strokeWidth: 2,
+                strokeDashArray: [5, 5], // 虚线预览
+                opacity: 0.6,
+                selectable: false,
+                evented: false
+            })
+
+            this.currentFabricCanvas.add(this.currentPreviewObject)
+            this.currentFabricCanvas.renderAll()
+        })
+
+        // 鼠标移动：实时预览
+        this.currentFabricCanvas.on('mouse:move', (e: any) => {
+            if (!this.isDrawing || !e.pointer || !this.currentPreviewObject) return
+
+            // 计算矩形位置和尺寸
+            const left = Math.min(startPos.x, e.pointer.x)
+            const top = Math.min(startPos.y, e.pointer.y)
+            const width = Math.abs(e.pointer.x - startPos.x)
+            const height = Math.abs(e.pointer.y - startPos.y)
+
+            // 更新预览矩形
+            this.currentPreviewObject.set({
+                left: left,
+                top: top,
+                width: width,
+                height: height
+            })
+
+            this.currentFabricCanvas.renderAll()
+        })
+
+        // 鼠标松开：完成绘制
+        this.currentFabricCanvas.on('mouse:up', (e: any) => {
+            if (!this.isDrawing || !e.pointer) return
+            this.isDrawing = false
+
+            // 移除预览对象
+            if (this.currentPreviewObject) {
+                this.currentFabricCanvas.remove(this.currentPreviewObject)
+            }
+
+            // 计算最终矩形参数
+            const left = Math.min(startPos.x, e.pointer.x)
+            const top = Math.min(startPos.y, e.pointer.y)
+            const width = Math.abs(e.pointer.x - startPos.x)
+            const height = Math.abs(e.pointer.y - startPos.y)
+
+            // 只有当矩形有足够大小时才创建
+            const minSize = 10
+            if (width >= minSize && height >= minSize) {
+                // 创建正式的矩形
+                const rect = new fabric.Rect({
+                    left: left,
+                    top: top,
+                    width: width,
+                    height: height,
+                    fill: 'transparent',
+                    stroke: color,
+                    strokeWidth: 2,
+                    selectable: true,
+                    hasControls: false, // 禁用角落控制点，避免对角线和变形
+                    hasBorders: true,
+                    lockRotation: true, // 禁止旋转
+                    lockScalingFlip: true, // 禁止翻转
+                    cornerStyle: 'circle', // 如果显示控制点，使用圆形
+                    cornerSize: 8,
+                    transparentCorners: false
+                })
+
+                this.currentFabricCanvas.add(rect)
+            }
+
+            this.currentPreviewObject = null
+            this.currentFabricCanvas.renderAll()
+        })
+    }
+
+    // 启用选择模式
+    private enableSelectMode(): void {
+        if (!this.currentFabricCanvas) return
+
+        // 选择模式不需要额外的事件监听器
+        // Fabric.js 会自动处理对象选择和移动
+        // 确保画布可以选择对象
+        this.currentFabricCanvas.selection = true
+        
+        // 允许所有对象被选中（除了背景图片）
+        this.currentFabricCanvas.forEachObject((obj: any) => {
+            if (obj.type !== 'image') {
+                obj.selectable = true
+                obj.evented = true
+            }
+        })
+
+        console.log('✅ 已启用选择模式')
+    }
+
+    // 删除选中的标记
+    private deleteSelectedMarkup(): void {
+        if (!this.currentFabricCanvas) return
+
+        const activeObjects = this.currentFabricCanvas.getActiveObjects()
+        if (activeObjects.length > 0) {
+            activeObjects.forEach((obj: any) => {
+                // 不删除背景图片
+                if (obj.type !== 'image') {
+                    this.currentFabricCanvas!.remove(obj)
+                }
+            })
+            this.currentFabricCanvas.discardActiveObject()
+            this.currentFabricCanvas.renderAll()
+        }
+    }
+
+    // 导出标记后的图片
+    private exportMarkupImage(shouldDownload: boolean, originalBlocks: CaptureBlock[]): void {
+        if (!this.currentFabricCanvas) return
+
+        console.log(`🖼️ 导出标记图片 (下载: ${shouldDownload})`)
+
+        // 将整个画布导出为图片
+        const dataURL = this.currentFabricCanvas.toDataURL({
+            format: 'png',
+            quality: 0.9
+        })
+
+        // 转换为Blob
+        fetch(dataURL)
+            .then(res => res.blob())
+            .then(blob => {
+                if (shouldDownload) {
+                    // 下载并复制
+                    this.copyImageToClipboard(blob).then(() => {
+                        this.performDownload(blob, originalBlocks.length, true)
+                    }).catch(() => {
+                        this.performDownload(blob, originalBlocks.length, true)
+                    })
+                } else {
+                    // 只复制到剪贴板
+                    this.copyImageToClipboard(blob).then(() => {
+                        this.showSuccessNotification()
+                    }).catch(() => {
+                        console.error('❌ 复制到剪贴板失败')
+                    })
+                }
+            })
+            .catch(error => {
+                console.error('❌ 导出标记图片失败:', error)
+            })
+    }
+
+    // 关闭标记编辑器
+    private closeMarkupEditor(modalContainer: HTMLElement): void {
+        // 清理所有状态
+        if (this.currentFabricCanvas) {
+            // 清理事件监听器和临时对象
+            this.clearAllEventListeners()
+            
+            // 销毁Fabric画布
+            this.currentFabricCanvas.dispose()
+            this.currentFabricCanvas = null
+        }
+
+        // 重置所有状态变量
+        this.currentPreviewObject = null
+        this.currentTool = 'select'
+        this.currentColor = '#ee0000'
+        this.isDrawing = false
+
+        // 移除模态框
+        if (modalContainer.parentNode) {
+            modalContainer.parentNode.removeChild(modalContainer)
+        }
+
+        console.log('🎨 标记编辑器已关闭，所有状态已清理')
+    }
+
 }
