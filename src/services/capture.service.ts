@@ -640,10 +640,19 @@ export class CaptureService {
             const isPrompt = this.isPromptLineSimple(line)
 
             if (isPrompt) {
-                // 遇到提示符：检查前一个区块是否有内容
-                if (pendingBlock && pendingBlock.lines.length > 1) {
-                    // 有实际命令内容，创建区块
-                    blocks.push(this.createBlockFromPending(pendingBlock, blocks.length))
+                // 遇到提示符：先处理前一个区块
+                if (pendingBlock && pendingBlock.lines.length > 0) {
+                    // 修复逻辑：任何包含提示符的区块都应该被保留
+                    // 无论是否有后续输出内容
+                    const hasPromptLine = pendingBlock.lines.some(line => this.isPromptLineSimple(line))
+                    const hasActualContent = pendingBlock.lines.some((line, index) =>
+                        index > 0 && line.trim().length > 0 && !this.isPromptLineSimple(line)
+                    )
+                    
+                    // 如果有提示符行，则认为是有效的命令区块（无论是否有输出）
+                    if (hasPromptLine || hasActualContent) {
+                        blocks.push(this.createBlockFromPending(pendingBlock, blocks.length))
+                    }
                 }
 
                 // 开始新的潜在区块
@@ -665,12 +674,14 @@ export class CaptureService {
 
         // 处理最后一个潜在区块
         if (pendingBlock && pendingBlock.lines.length > 0) {
-            // 检查是否有实际内容（不仅仅是提示符）
+            // 修复逻辑：检查是否包含提示符或有实际内容
+            const hasPromptLine = pendingBlock.lines.some(line => this.isPromptLineSimple(line))
             const hasActualContent = pendingBlock.lines.some((line, index) =>
                 index > 0 && line.trim().length > 0 && !this.isPromptLineSimple(line)
             )
-
-            if (hasActualContent) {
+            
+            // 如果有提示符行或有实际内容，都应该创建区块
+            if (hasPromptLine || hasActualContent) {
                 blocks.push(this.createBlockFromPending(pendingBlock, blocks.length))
             }
         }
