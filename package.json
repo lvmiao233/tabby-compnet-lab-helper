@@ -1,6 +1,6 @@
 {
   "name": "tabby-compnet-lab-helper",
-  "version": "0.2.20",
+  "version": "0.2.21",
   "description": "Tabby Compnet Lab Helper - GNS3实验助手",
   "keywords": [
     "tabby-plugin"

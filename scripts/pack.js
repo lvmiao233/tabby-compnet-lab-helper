@@ -25,11 +25,14 @@ archive.on('error', function(err) {
 // 将输出流绑定到 archiver
 archive.pipe(output);
 
-// 添加 dist 目录
-archive.directory('dist/', 'dist/');
+// 创建外层文件夹结构
+const folderName = 'tabby-compnet-lab-helper';
 
-// 添加 package.json
-archive.file('package.json', { name: 'package.json' });
+// 添加 dist 目录到外层文件夹
+archive.directory('dist/', `${folderName}/dist/`);
+
+// 添加 package.json 到外层文件夹
+archive.file('package.json', { name: `${folderName}/package.json` });
 
 // 完成归档
 archive.finalize();
